@@ -1,0 +1,10 @@
+# Собранные бинарники
+/cli-manager
+*.exe
+
+# Служебные каталоги инструментов
+.omc/
+.antigravitycli/
+
+# OS
+.DS_Store

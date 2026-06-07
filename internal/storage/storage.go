@@ -1,0 +1,54 @@
+package storage
+
+import (
+	"os"
+	"path/filepath"
+
+	"gopkg.in/yaml.v3"
+
+	"cli-manager/internal/models"
+)
+
+// ConfigPath возвращает путь к файлу конфигурации (~/.config/cli-manager/config.yaml).
+func ConfigPath() string {
+	home, _ := os.UserHomeDir()
+	return filepath.Join(home, ".config", "cli-manager", "config.yaml")
+}
+
+// LoadConfig читает конфигурацию с диска. Если файла нет — возвращает пустой,
+// но валидный Config (с инициализированной картой переменных).
+func LoadConfig() (*models.Config, error) {
+	path := ConfigPath()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return &models.Config{Variables: map[string]string{}}, nil
+		}
+		return nil, err
+	}
+
+	var cfg models.Config
+	if err := yaml.Unmarshal(data, &cfg); err != nil {
+		return nil, err
+	}
+	if cfg.Variables == nil {
+		cfg.Variables = map[string]string{}
+	}
+	return &cfg, nil
+}
+
+// SaveConfig сериализует конфигурацию в YAML и записывает на диск,
+// создавая директорию при необходимости.
+func SaveConfig(cfg *models.Config) error {
+	path := ConfigPath()
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+
+	data, err := yaml.Marshal(cfg)
+	if err != nil {
+		return err
+	}
+
+	return os.WriteFile(path, data, 0o644)
+}
