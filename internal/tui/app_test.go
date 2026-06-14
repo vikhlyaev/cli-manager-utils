@@ -151,6 +151,30 @@ func TestPreviewOpensAndReturns(t *testing.T) {
 	}
 }
 
+// TestUndoRestoresAfterDelete — `u` откатывает последнюю мутацию (удаление).
+func TestUndoRestoresAfterDelete(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	cfg := &models.Config{
+		Variables: map[string]string{},
+		Prefixes:  []models.Prefix{{Name: "av"}, {Name: "gx"}},
+	}
+	m := NewModel(cfg)
+	m = feed(m,
+		tea.WindowSizeMsg{Width: 80, Height: 24},
+		tea.KeyMsg{Type: tea.KeyEnter}, // -> Префиксы
+		runes("d"),                     // запрос удаления
+		runes("y"),                     // подтвердить -> удалён 'av'
+	)
+	if len(m.cfg.Prefixes) != 1 || m.cfg.Prefixes[0].Name != "gx" {
+		t.Fatalf("после удаления ожидался один 'gx', получено %+v", m.cfg.Prefixes)
+	}
+
+	m = feed(m, runes("u")) // отмена
+	if len(m.cfg.Prefixes) != 2 || m.cfg.Prefixes[0].Name != "av" || m.cfg.Prefixes[1].Name != "gx" {
+		t.Fatalf("после отмены ожидались av,gx; получено %+v", m.cfg.Prefixes)
+	}
+}
+
 // TestEditPrefixPrefills — при редактировании буфер формы предзаполняется текущими
 // значениями (раньше они подставлялись после построения формы и терялись).
 func TestEditPrefixPrefills(t *testing.T) {

@@ -38,11 +38,17 @@ func LoadConfig() (*models.Config, error) {
 }
 
 // SaveConfig сериализует конфигурацию в YAML и записывает на диск,
-// создавая директорию при необходимости.
+// создавая директорию при необходимости. Перед перезаписью предыдущая версия
+// файла копируется в config.yaml.bak — простой одноуровневый бэкап.
 func SaveConfig(cfg *models.Config) error {
 	path := ConfigPath()
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
+	}
+
+	// Бэкап текущего файла перед перезаписью (если он есть).
+	if existing, err := os.ReadFile(path); err == nil {
+		_ = os.WriteFile(path+".bak", existing, 0o644)
 	}
 
 	data, err := yaml.Marshal(cfg)
@@ -51,4 +57,22 @@ func SaveConfig(cfg *models.Config) error {
 	}
 
 	return os.WriteFile(path, data, 0o644)
+}
+
+// CloneConfig возвращает глубокую копию конфигурации (через YAML round-trip).
+// Используется для снимков в undo-стеке: снимок не должен делить срезы/карты с
+// рабочей копией.
+func CloneConfig(cfg *models.Config) (*models.Config, error) {
+	data, err := yaml.Marshal(cfg)
+	if err != nil {
+		return nil, err
+	}
+	var c models.Config
+	if err := yaml.Unmarshal(data, &c); err != nil {
+		return nil, err
+	}
+	if c.Variables == nil {
+		c.Variables = map[string]string{}
+	}
+	return &c, nil
 }

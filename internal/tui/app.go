@@ -95,7 +95,12 @@ type model struct {
 	previewReady  bool         // viewport получил размеры (WindowSizeMsg)
 	previewTitle  string       // заголовок над окном предпросмотра
 	previousState sessionState // куда вернуться по Esc из предпросмотра
+
+	// undo: снимки конфигурации до каждой мутации (последний — самый свежий)
+	undoStack []*models.Config
 }
+
+const undoLimit = 50
 
 func newList(title string) list.Model {
 	l := list.New([]list.Item{}, list.NewDefaultDelegate(), 0, 0)
@@ -193,6 +198,74 @@ func (m *model) persist() {
 	m.statusErr = false
 }
 
+// pushUndo сохраняет снимок текущей конфигурации в undo-стек. Вызывается перед
+// каждой мутацией (до изменения cfg).
+func (m *model) pushUndo() {
+	snap, err := storage.CloneConfig(m.cfg)
+	if err != nil {
+		return
+	}
+	m.undoStack = append(m.undoStack, snap)
+	if len(m.undoStack) > undoLimit {
+		m.undoStack = m.undoStack[len(m.undoStack)-undoLimit:]
+	}
+}
+
+// undo откатывает последнюю мутацию: восстанавливает снимок, сохраняет его на
+// диск, перегенерирует скрипт и обновляет списки.
+func (m *model) undo() {
+	if len(m.undoStack) == 0 {
+		m.status = "Нечего отменять"
+		m.statusErr = false
+		return
+	}
+	prev := m.undoStack[len(m.undoStack)-1]
+	m.undoStack = m.undoStack[:len(m.undoStack)-1]
+	m.cfg = prev
+
+	if err := storage.SaveConfig(m.cfg); err != nil {
+		m.status = "Ошибка отмены: " + err.Error()
+		m.statusErr = true
+		return
+	}
+	if err := (compiler.ZshCompiler{}).Generate(m.cfg); err != nil {
+		m.status = "Ошибка генерации zsh: " + err.Error()
+		m.statusErr = true
+		return
+	}
+	m.clampAndRefresh()
+	m.status = "Отменено ✓"
+	m.statusErr = false
+}
+
+// clampAndRefresh приводит активные индексы к актуальным границам после замены
+// конфигурации (undo) и пересобирает списки, удерживая выделение в допустимых
+// пределах.
+func (m *model) clampAndRefresh() {
+	if m.activePrefixIdx >= len(m.cfg.Prefixes) {
+		m.activePrefixIdx = len(m.cfg.Prefixes) - 1
+	}
+	if m.activePrefixIdx < 0 {
+		m.activePrefixIdx = 0
+	}
+	m.refreshPrefixList()
+	m.refreshVariableList()
+
+	if len(m.cfg.Prefixes) > 0 {
+		cmds := m.cfg.Prefixes[m.activePrefixIdx].Commands
+		if m.activeCommandIdx >= len(cmds) {
+			m.activeCommandIdx = len(cmds) - 1
+		}
+		if m.activeCommandIdx < 0 {
+			m.activeCommandIdx = 0
+		}
+		m.refreshCommandList()
+		if len(cmds) > 0 {
+			m.refreshFlagList()
+		}
+	}
+}
+
 func (m model) Init() tea.Cmd { return nil }
 
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -254,6 +327,15 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		var cmd tea.Cmd
 		m.previewVP, cmd = m.previewVP.Update(msg)
 		return m, cmd
+	}
+
+	// Отмена последней мутации доступна во всех списках.
+	if key, ok := msg.(tea.KeyMsg); ok && key.String() == "u" {
+		switch m.state {
+		case statePrefixList, stateCommandList, stateFlagList, stateVariableList:
+			m.undo()
+			return m, nil
+		}
 	}
 
 	if key, ok := msg.(tea.KeyMsg); ok {
@@ -516,6 +598,7 @@ func (m *model) updateVariableList(key tea.KeyMsg) (tea.Cmd, bool) {
 // Вызывается только из режима confirmDelete, где навигация заблокирована, поэтому
 // текущий индекс списка соответствует тому, что пользователь подтверждает.
 func (m *model) performDelete() {
+	m.pushUndo()
 	switch m.state {
 	case statePrefixList:
 		idx := m.prefixesList.Index()
@@ -574,6 +657,7 @@ func (m *model) movePrefix(delta int) {
 	if i < 0 || j < 0 || j >= len(ps) {
 		return
 	}
+	m.pushUndo()
 	ps[i], ps[j] = ps[j], ps[i]
 	m.persist()
 	m.refreshPrefixList()
@@ -587,6 +671,7 @@ func (m *model) moveCommand(delta int) {
 	if i < 0 || j < 0 || j >= len(cs) {
 		return
 	}
+	m.pushUndo()
 	cs[i], cs[j] = cs[j], cs[i]
 	m.persist()
 	m.refreshCommandList()
@@ -600,6 +685,7 @@ func (m *model) moveFlag(delta int) {
 	if i < 0 || j < 0 || j >= len(fs) {
 		return
 	}
+	m.pushUndo()
 	fs[i], fs[j] = fs[j], fs[i]
 	m.persist()
 	m.refreshFlagList()
@@ -678,6 +764,7 @@ func (m *model) exitForm() {
 // commitForm применяет данные формы к конфигурации, сохраняет и возвращает к списку.
 // Значения берём из стабильного буфера m.fb (см. комментарий к formBuffers).
 func (m *model) commitForm() {
+	m.pushUndo()
 	switch m.state {
 	case statePrefixForm:
 		if m.formMode == modeEdit {
@@ -753,16 +840,16 @@ func (m model) View() string {
 		return m.viewMainMenu()
 	case statePrefixList:
 		return m.listView(m.prefixesList.View(),
-			"[n] новый  [e] изменить  [d] удалить  [⇧↑/↓] порядок  [p] zsh  [enter] открыть  [esc] меню")
+			"[n] новый  [e] изменить  [d] удалить  [⇧↑/↓] порядок  [p] zsh  [u] отмена  [enter] открыть  [esc] меню")
 	case stateCommandList:
 		return m.listView(m.commandsList.View(),
-			"[n] новая  [e] изменить  [d] удалить  [⇧↑/↓] порядок  [p] zsh  [enter] флаги  [esc] назад")
+			"[n] новая  [e] изменить  [d] удалить  [⇧↑/↓] порядок  [p] zsh  [u] отмена  [enter] флаги  [esc] назад")
 	case stateFlagList:
 		return m.listView(m.flagsList.View(),
-			"[n] новый  [e] изменить  [d] удалить  [⇧↑/↓] порядок  [esc] назад")
+			"[n] новый  [e] изменить  [d] удалить  [⇧↑/↓] порядок  [u] отмена  [esc] назад")
 	case stateVariableList:
 		return m.listView(m.variablesList.View(),
-			"[n] новая  [e] изменить  [d] удалить  [esc] меню")
+			"[n] новая  [e] изменить  [d] удалить  [u] отмена  [esc] меню")
 	case statePreview:
 		return m.viewPreview()
 	case statePrefixForm, stateCommandForm, stateFlagForm, stateVariableForm:
