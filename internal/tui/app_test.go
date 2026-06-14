@@ -101,6 +101,56 @@ func TestDeleteRequiresConfirmation(t *testing.T) {
 	}
 }
 
+// TestReorderCommands — `J` перемещает выбранную команду вниз, порядок
+// сохраняется, выделение следует за элементом.
+func TestReorderCommands(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	cfg := &models.Config{
+		Variables: map[string]string{},
+		Prefixes: []models.Prefix{{Name: "av", Commands: []models.Command{
+			{Name: "a"}, {Name: "b"},
+		}}},
+	}
+	m := NewModel(cfg)
+	m = feed(m,
+		tea.WindowSizeMsg{Width: 80, Height: 24},
+		tea.KeyMsg{Type: tea.KeyEnter}, // -> Префиксы
+		tea.KeyMsg{Type: tea.KeyEnter}, // -> Команды (av)
+		runes("J"),                     // переместить первую команду вниз
+	)
+	cs := m.cfg.Prefixes[0].Commands
+	if cs[0].Name != "b" || cs[1].Name != "a" {
+		t.Fatalf("ожидался порядок b,a, получено %s,%s", cs[0].Name, cs[1].Name)
+	}
+	if m.commandsList.Index() != 1 {
+		t.Errorf("выделение должно следовать за перемещённым элементом (idx 1), получено %d",
+			m.commandsList.Index())
+	}
+}
+
+// TestPreviewOpensAndReturns — `p` открывает предпросмотр zsh, Esc возвращает назад.
+func TestPreviewOpensAndReturns(t *testing.T) {
+	cfg := &models.Config{
+		Variables: map[string]string{},
+		Prefixes: []models.Prefix{{Name: "av", Commands: []models.Command{
+			{Name: "note", Run: "echo hi"},
+		}}},
+	}
+	m := NewModel(cfg)
+	m = feed(m,
+		tea.WindowSizeMsg{Width: 80, Height: 24},
+		tea.KeyMsg{Type: tea.KeyEnter}, // -> Префиксы
+		runes("p"),                     // предпросмотр
+	)
+	if m.state != statePreview {
+		t.Fatalf("ожидалось состояние предпросмотра, получено %v", m.state)
+	}
+	m = feed(m, tea.KeyMsg{Type: tea.KeyEsc})
+	if m.state != statePrefixList {
+		t.Fatalf("после Esc ожидался список префиксов, получено %v", m.state)
+	}
+}
+
 // TestEditPrefixPrefills — при редактировании буфер формы предзаполняется текущими
 // значениями (раньше они подставлялись после построения формы и терялись).
 func TestEditPrefixPrefills(t *testing.T) {

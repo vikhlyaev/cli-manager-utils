@@ -35,6 +35,19 @@ func (z ZshCompiler) Generate(cfg *models.Config) error {
 	return os.WriteFile(path, []byte(script), 0o644)
 }
 
+// Render возвращает полный текст скрипта без записи на диск (для предпросмотра).
+func (z ZshCompiler) Render(cfg *models.Config) string {
+	return z.render(cfg)
+}
+
+// RenderPrefix возвращает сгенерированный фрагмент скрипта для одного префикса
+// (функция-диспетчер, справка и автодополнение) — для предпросмотра в TUI.
+func (z ZshCompiler) RenderPrefix(p models.Prefix) string {
+	var b strings.Builder
+	z.renderPrefix(&b, p)
+	return b.String()
+}
+
 // render формирует текст скрипта в памяти (вынесено отдельно для тестируемости).
 func (z ZshCompiler) render(cfg *models.Config) string {
 	var b strings.Builder

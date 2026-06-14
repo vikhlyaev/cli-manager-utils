@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/bubbles/list"
+	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/huh"
 	"github.com/charmbracelet/lipgloss"
@@ -42,6 +43,7 @@ const (
 	stateCommandForm
 	stateFlagForm
 	stateVariableForm
+	statePreview
 )
 
 // formMode различает создание нового элемента и редактирование существующего.
@@ -87,6 +89,12 @@ type model struct {
 	// подтверждение удаления
 	confirmDelete bool
 	deleteLabel   string // что именно удаляем — для текста запроса
+
+	// предпросмотр сгенерированного zsh
+	previewVP     viewport.Model
+	previewReady  bool         // viewport получил размеры (WindowSizeMsg)
+	previewTitle  string       // заголовок над окном предпросмотра
+	previousState sessionState // куда вернуться по Esc из предпросмотра
 }
 
 func newList(title string) list.Model {
@@ -201,6 +209,18 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.commandsList.SetSize(w, ht)
 		m.flagsList.SetSize(w, ht)
 		m.variablesList.SetSize(w, ht)
+
+		// Резервируем строки под заголовок (имя + путь), отступы и подсказки.
+		vpH := ht - 5
+		if vpH < 1 {
+			vpH = 1
+		}
+		if !m.previewReady {
+			m.previewVP = viewport.New(w, vpH)
+			m.previewReady = true
+		} else {
+			m.previewVP.Width, m.previewVP.Height = w, vpH
+		}
 	}
 
 	// Активная форма перехватывает обработку.
@@ -220,6 +240,20 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 		return m, nil
+	}
+
+	// Экран предпросмотра: Esc возвращает назад, остальное — прокрутка viewport.
+	if m.state == statePreview {
+		if key, ok := msg.(tea.KeyMsg); ok {
+			switch key.String() {
+			case "esc", "q":
+				m.state = m.previousState
+				return m, nil
+			}
+		}
+		var cmd tea.Cmd
+		m.previewVP, cmd = m.previewVP.Update(msg)
+		return m, cmd
 	}
 
 	if key, ok := msg.(tea.KeyMsg); ok {
@@ -326,6 +360,18 @@ func (m *model) updatePrefixList(key tea.KeyMsg) (tea.Cmd, bool) {
 				item.prefix.Name, len(item.prefix.Commands))
 		}
 		return nil, true
+	case "p":
+		if item, ok := m.prefixesList.SelectedItem().(prefixItem); ok {
+			content := (compiler.ZshCompiler{}).RenderPrefix(item.prefix)
+			m.openPreview("Предпросмотр zsh · префикс '"+item.prefix.Name+"'", content)
+		}
+		return nil, true
+	case "K", "shift+up":
+		m.movePrefix(-1)
+		return nil, true
+	case "J", "shift+down":
+		m.movePrefix(1)
+		return nil, true
 	case "enter":
 		if _, ok := m.prefixesList.SelectedItem().(prefixItem); ok {
 			m.activePrefixIdx = m.prefixesList.Index()
@@ -370,6 +416,17 @@ func (m *model) updateCommandList(key tea.KeyMsg) (tea.Cmd, bool) {
 			m.deleteLabel = fmt.Sprintf("команду '%s'", item.cmd.Name)
 		}
 		return nil, true
+	case "p":
+		p := m.cfg.Prefixes[m.activePrefixIdx]
+		content := (compiler.ZshCompiler{}).RenderPrefix(p)
+		m.openPreview("Предпросмотр zsh · префикс '"+p.Name+"'", content)
+		return nil, true
+	case "K", "shift+up":
+		m.moveCommand(-1)
+		return nil, true
+	case "J", "shift+down":
+		m.moveCommand(1)
+		return nil, true
 	case "enter":
 		if _, ok := m.commandsList.SelectedItem().(commandItem); ok {
 			m.activeCommandIdx = m.commandsList.Index()
@@ -412,6 +469,12 @@ func (m *model) updateFlagList(key tea.KeyMsg) (tea.Cmd, bool) {
 			m.confirmDelete = true
 			m.deleteLabel = fmt.Sprintf("флаг '%s'", item.flag.Name)
 		}
+		return nil, true
+	case "K", "shift+up":
+		m.moveFlag(-1)
+		return nil, true
+	case "J", "shift+down":
+		m.moveFlag(1)
 		return nil, true
 	}
 	return nil, false
@@ -487,6 +550,60 @@ func (m *model) performDelete() {
 	}
 	m.confirmDelete = false
 	m.deleteLabel = ""
+}
+
+// openPreview наполняет viewport содержимым и переключается на экран предпросмотра,
+// запоминая текущее состояние для возврата по Esc.
+func (m *model) openPreview(title, content string) {
+	m.previewTitle = title
+	if m.previewReady {
+		m.previewVP.SetContent(content)
+		m.previewVP.GotoTop()
+	}
+	m.previousState = m.state
+	m.state = statePreview
+}
+
+// movePrefix/moveCommand/moveFlag переставляют выбранный элемент на delta позиций
+// (порядок влияет на справку и автодополнение), сохраняют и удерживают выделение
+// на перемещённом элементе.
+func (m *model) movePrefix(delta int) {
+	ps := m.cfg.Prefixes
+	i := m.prefixesList.Index()
+	j := i + delta
+	if i < 0 || j < 0 || j >= len(ps) {
+		return
+	}
+	ps[i], ps[j] = ps[j], ps[i]
+	m.persist()
+	m.refreshPrefixList()
+	m.prefixesList.Select(j)
+}
+
+func (m *model) moveCommand(delta int) {
+	cs := m.cfg.Prefixes[m.activePrefixIdx].Commands
+	i := m.commandsList.Index()
+	j := i + delta
+	if i < 0 || j < 0 || j >= len(cs) {
+		return
+	}
+	cs[i], cs[j] = cs[j], cs[i]
+	m.persist()
+	m.refreshCommandList()
+	m.commandsList.Select(j)
+}
+
+func (m *model) moveFlag(delta int) {
+	fs := m.cfg.Prefixes[m.activePrefixIdx].Commands[m.activeCommandIdx].Flags
+	i := m.flagsList.Index()
+	j := i + delta
+	if i < 0 || j < 0 || j >= len(fs) {
+		return
+	}
+	fs[i], fs[j] = fs[j], fs[i]
+	m.persist()
+	m.refreshFlagList()
+	m.flagsList.Select(j)
 }
 
 // --- Обработка форм ---
@@ -636,20 +753,32 @@ func (m model) View() string {
 		return m.viewMainMenu()
 	case statePrefixList:
 		return m.listView(m.prefixesList.View(),
-			"[n] новый  [e] изменить  [d] удалить  [enter] открыть  [esc] меню  [ctrl+c] выход")
+			"[n] новый  [e] изменить  [d] удалить  [⇧↑/↓] порядок  [p] zsh  [enter] открыть  [esc] меню")
 	case stateCommandList:
 		return m.listView(m.commandsList.View(),
-			"[n] новая  [e] изменить  [d] удалить  [enter] флаги  [esc] назад")
+			"[n] новая  [e] изменить  [d] удалить  [⇧↑/↓] порядок  [p] zsh  [enter] флаги  [esc] назад")
 	case stateFlagList:
 		return m.listView(m.flagsList.View(),
-			"[n] новый  [e] изменить  [d] удалить  [esc] назад")
+			"[n] новый  [e] изменить  [d] удалить  [⇧↑/↓] порядок  [esc] назад")
 	case stateVariableList:
 		return m.listView(m.variablesList.View(),
 			"[n] новая  [e] изменить  [d] удалить  [esc] меню")
+	case statePreview:
+		return m.viewPreview()
 	case statePrefixForm, stateCommandForm, stateFlagForm, stateVariableForm:
 		return m.viewForm()
 	}
 	return ""
+}
+
+// viewPreview отрисовывает экран предпросмотра сгенерированного zsh с заголовком,
+// путём итогового файла (№7) и прокручиваемым содержимым.
+func (m model) viewPreview() string {
+	path := (compiler.ZshCompiler{}).OutputPath()
+	header := headerStyle.Render(m.previewTitle) + "\n" +
+		hintStyle.Render("Файл: "+path)
+	hints := hintStyle.Render("[↑/↓] прокрутка  [esc] назад")
+	return docStyle.Render(header + "\n\n" + m.previewVP.View() + "\n\n" + hints)
 }
 
 func (m model) viewMainMenu() string {

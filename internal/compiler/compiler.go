@@ -8,4 +8,6 @@ type Compiler interface {
 	// Generate генерирует итоговый скрипт из конфигурации и сохраняет его
 	// в соответствующее для оболочки место.
 	Generate(cfg *models.Config) error
+	// OutputPath возвращает путь, по которому сохраняется сгенерированный скрипт.
+	OutputPath() string
 }
