@@ -15,7 +15,9 @@ func (i prefixItem) Title() string {
 	}
 	return i.prefix.Name
 }
-func (i prefixItem) Description() string { return fmt.Sprintf("команд: %d", len(i.prefix.Commands)) }
+func (i prefixItem) Description() string {
+	return fmt.Sprintf("команд: %d", len(i.prefix.Commands))
+}
 func (i prefixItem) FilterValue() string { return i.prefix.Name }
 
 // commandItem — элемент списка команд.
@@ -60,5 +62,5 @@ type variableItem struct {
 }
 
 func (i variableItem) Title() string       { return i.key }
-func (i variableItem) Description() string  { return i.value }
-func (i variableItem) FilterValue() string  { return i.key }
+func (i variableItem) Description() string { return i.value }
+func (i variableItem) FilterValue() string { return i.key }

@@ -78,10 +78,15 @@ type model struct {
 
 	// UX-состояние
 	collision  bool
+	syntaxErr  string // живая ошибка `bash -n` для поля run (не блокирует ввод)
 	testOutput string
 	testErr    bool
 	status     string
 	statusErr  bool
+
+	// подтверждение удаления
+	confirmDelete bool
+	deleteLabel   string // что именно удаляем — для текста запроса
 }
 
 func newList(title string) list.Model {
@@ -114,6 +119,7 @@ func NewModel(cfg *models.Config) model {
 func (m *model) newFormBuffers() {
 	m.fb = &formBuffers{}
 	m.collision = false
+	m.syntaxErr = ""
 	m.testOutput = ""
 	m.testErr = false
 	m.editKey = ""
@@ -200,6 +206,20 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// Активная форма перехватывает обработку.
 	if m.isFormState() {
 		return m.updateForm(msg)
+	}
+
+	// Режим подтверждения удаления перехватывает ввод (навигация заблокирована).
+	if m.confirmDelete {
+		if key, ok := msg.(tea.KeyMsg); ok {
+			switch key.String() {
+			case "y", "Y", "enter":
+				m.performDelete()
+			case "n", "N", "esc":
+				m.confirmDelete = false
+				m.deleteLabel = ""
+			}
+		}
+		return m, nil
 	}
 
 	if key, ok := msg.(tea.KeyMsg); ok {
@@ -300,11 +320,10 @@ func (m *model) updatePrefixList(key tea.KeyMsg) (tea.Cmd, bool) {
 			return cmd, true
 		}
 	case "d":
-		if _, ok := m.prefixesList.SelectedItem().(prefixItem); ok {
-			idx := m.prefixesList.Index()
-			m.cfg.Prefixes = append(m.cfg.Prefixes[:idx], m.cfg.Prefixes[idx+1:]...)
-			m.persist()
-			m.refreshPrefixList()
+		if item, ok := m.prefixesList.SelectedItem().(prefixItem); ok {
+			m.confirmDelete = true
+			m.deleteLabel = fmt.Sprintf("префикс '%s' (команд: %d)",
+				item.prefix.Name, len(item.prefix.Commands))
 		}
 		return nil, true
 	case "enter":
@@ -346,12 +365,9 @@ func (m *model) updateCommandList(key tea.KeyMsg) (tea.Cmd, bool) {
 			return cmd, true
 		}
 	case "d":
-		if _, ok := m.commandsList.SelectedItem().(commandItem); ok {
-			idx := m.commandsList.Index()
-			cs := m.cfg.Prefixes[m.activePrefixIdx].Commands
-			m.cfg.Prefixes[m.activePrefixIdx].Commands = append(cs[:idx], cs[idx+1:]...)
-			m.persist()
-			m.refreshCommandList()
+		if item, ok := m.commandsList.SelectedItem().(commandItem); ok {
+			m.confirmDelete = true
+			m.deleteLabel = fmt.Sprintf("команду '%s'", item.cmd.Name)
 		}
 		return nil, true
 	case "enter":
@@ -392,13 +408,9 @@ func (m *model) updateFlagList(key tea.KeyMsg) (tea.Cmd, bool) {
 			return cmd, true
 		}
 	case "d":
-		if _, ok := m.flagsList.SelectedItem().(flagItem); ok {
-			idx := m.flagsList.Index()
-			fs := m.cfg.Prefixes[m.activePrefixIdx].Commands[m.activeCommandIdx].Flags
-			m.cfg.Prefixes[m.activePrefixIdx].Commands[m.activeCommandIdx].Flags =
-				append(fs[:idx], fs[idx+1:]...)
-			m.persist()
-			m.refreshFlagList()
+		if item, ok := m.flagsList.SelectedItem().(flagItem); ok {
+			m.confirmDelete = true
+			m.deleteLabel = fmt.Sprintf("флаг '%s'", item.flag.Name)
 		}
 		return nil, true
 	}
@@ -429,13 +441,52 @@ func (m *model) updateVariableList(key tea.KeyMsg) (tea.Cmd, bool) {
 		}
 	case "d":
 		if item, ok := m.variablesList.SelectedItem().(variableItem); ok {
-			delete(m.cfg.Variables, item.key)
-			m.persist()
-			m.refreshVariableList()
+			m.confirmDelete = true
+			m.deleteLabel = fmt.Sprintf("переменную '%s'", item.key)
 		}
 		return nil, true
 	}
 	return nil, false
+}
+
+// performDelete выполняет удаление выбранного элемента после подтверждения.
+// Вызывается только из режима confirmDelete, где навигация заблокирована, поэтому
+// текущий индекс списка соответствует тому, что пользователь подтверждает.
+func (m *model) performDelete() {
+	switch m.state {
+	case statePrefixList:
+		idx := m.prefixesList.Index()
+		if idx >= 0 && idx < len(m.cfg.Prefixes) {
+			m.cfg.Prefixes = append(m.cfg.Prefixes[:idx], m.cfg.Prefixes[idx+1:]...)
+			m.persist()
+			m.refreshPrefixList()
+		}
+	case stateCommandList:
+		cs := m.cfg.Prefixes[m.activePrefixIdx].Commands
+		idx := m.commandsList.Index()
+		if idx >= 0 && idx < len(cs) {
+			m.cfg.Prefixes[m.activePrefixIdx].Commands = append(cs[:idx], cs[idx+1:]...)
+			m.persist()
+			m.refreshCommandList()
+		}
+	case stateFlagList:
+		fs := m.cfg.Prefixes[m.activePrefixIdx].Commands[m.activeCommandIdx].Flags
+		idx := m.flagsList.Index()
+		if idx >= 0 && idx < len(fs) {
+			m.cfg.Prefixes[m.activePrefixIdx].Commands[m.activeCommandIdx].Flags =
+				append(fs[:idx], fs[idx+1:]...)
+			m.persist()
+			m.refreshFlagList()
+		}
+	case stateVariableList:
+		if item, ok := m.variablesList.SelectedItem().(variableItem); ok {
+			delete(m.cfg.Variables, item.key)
+			m.persist()
+			m.refreshVariableList()
+		}
+	}
+	m.confirmDelete = false
+	m.deleteLabel = ""
 }
 
 // --- Обработка форм ---
@@ -473,6 +524,15 @@ func (m model) updateForm(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// Живое предупреждение о коллизии имени команды.
 	if m.state == stateCommandForm {
 		m.collision = validation.CheckCollision(m.fb.name)
+	}
+
+	// Живая (неблокирующая) проверка синтаксиса bash-кода поля run.
+	if m.state == stateCommandForm || m.state == stateFlagForm {
+		if err := validation.CheckSyntax(m.fb.run); err != nil {
+			m.syntaxErr = err.Error()
+		} else {
+			m.syntaxErr = ""
+		}
 	}
 
 	if m.form.State == huh.StateCompleted {
@@ -613,7 +673,13 @@ func (m model) viewMainMenu() string {
 }
 
 func (m model) listView(body, hints string) string {
-	out := body + "\n\n  " + hintStyle.Render(hints)
+	out := body + "\n\n  "
+	if m.confirmDelete {
+		out += warnStyle.Render(fmt.Sprintf("Удалить %s? ", m.deleteLabel)) +
+			hintStyle.Render("[y] да  [n] нет")
+	} else {
+		out += hintStyle.Render(hints)
+	}
 	if m.status != "" {
 		out += "\n  " + m.statusLine()
 	}
@@ -635,6 +701,10 @@ func (m model) viewForm() string {
 		b.WriteString("\n" + warnStyle.Render(
 			fmt.Sprintf("⚠️  Команда '%s' уже существует в системе — возможно перекрытие!",
 				m.fb.name)))
+	}
+
+	if (m.state == stateCommandForm || m.state == stateFlagForm) && m.syntaxErr != "" {
+		b.WriteString("\n" + errStyle.Render("✗ синтаксис bash: "+m.syntaxErr))
 	}
 
 	if m.testOutput != "" {
