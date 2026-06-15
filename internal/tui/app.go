@@ -615,26 +615,44 @@ func (m *model) updateCommandList(key tea.KeyMsg) (tea.Cmd, bool) {
 		m.moveCommand(1)
 		return nil, true
 	case "f":
-		// Открыть флаги выбранной команды (актуально для листьев).
+		// Явно открыть флаги выбранной команды.
 		if _, ok := m.commandsList.SelectedItem().(commandItem); ok {
-			idx := m.commandsList.Index()
-			m.flagCmdPath = append(append([]int{}, m.cmdPath...), idx)
-			m.refreshFlagList()
-			m.flagsList.Select(0)
-			m.state = stateFlagList
+			m.openFlags(m.commandsList.Index())
+		}
+		return nil, true
+	case "s", "right":
+		// Явно войти в подкоманды (в т.ч. чтобы начать вложенность у листа).
+		if _, ok := m.commandsList.SelectedItem().(commandItem); ok {
+			m.enterSubcommands(m.commandsList.Index())
 		}
 		return nil, true
 	case "enter":
-		// Углубиться в подкоманды выбранной команды.
-		if _, ok := m.commandsList.SelectedItem().(commandItem); ok {
-			idx := m.commandsList.Index()
-			m.cmdPath = append(m.cmdPath, idx)
-			m.refreshCommandList()
-			m.commandsList.Select(0)
+		// По Enter делаем очевидное: ветвь — вглубь, лист — его флаги.
+		if item, ok := m.commandsList.SelectedItem().(commandItem); ok {
+			if item.cmd.IsBranch() {
+				m.enterSubcommands(m.commandsList.Index())
+			} else {
+				m.openFlags(m.commandsList.Index())
+			}
 		}
 		return nil, true
 	}
 	return nil, false
+}
+
+// openFlags открывает список флагов команды по индексу idx на текущем уровне.
+func (m *model) openFlags(idx int) {
+	m.flagCmdPath = append(append([]int{}, m.cmdPath...), idx)
+	m.refreshFlagList()
+	m.flagsList.Select(0)
+	m.state = stateFlagList
+}
+
+// enterSubcommands углубляется в подкоманды команды по индексу idx.
+func (m *model) enterSubcommands(idx int) {
+	m.cmdPath = append(m.cmdPath, idx)
+	m.refreshCommandList()
+	m.commandsList.Select(0)
 }
 
 func (m *model) updateFlagList(key tea.KeyMsg) (tea.Cmd, bool) {
@@ -1026,7 +1044,7 @@ func (m model) View() string {
 			"[n] новый  [e] изменить  [d] удалить  [⇧↑/↓] порядок  [p] zsh  [i] импорт  [u] отмена  [enter] открыть  [esc] меню")
 	case stateCommandList:
 		return m.listView(m.commandsList.View(),
-			"[n] новая  [e] изменить  [d] удалить  [⇧↑/↓] порядок  [f] флаги  [p] zsh  [u] отмена  [enter] вглубь  [esc] назад")
+			"[enter] лист→флаги/ветвь→вглубь  [s] подкоманды  [f] флаги  [n] новая  [e] изм  [d] удал  [⇧↑/↓] порядок  [p] zsh  [u] отмена  [esc] назад")
 	case stateFlagList:
 		return m.listView(m.flagsList.View(),
 			"[n] новый  [e] изменить  [d] удалить  [⇧↑/↓] порядок  [u] отмена  [esc] назад")
@@ -1111,8 +1129,46 @@ func (m model) statusLine() string {
 	return okStyle.Render(m.status)
 }
 
+// formHeader строит заголовок формы: что создаём/редактируем и в каком месте
+// дерева — чтобы было понятно, «где ты».
+func (m model) formHeader() string {
+	var title, ctx string
+	switch m.state {
+	case statePrefixForm:
+		if m.formMode == modeEdit {
+			title = "Изменение префикса"
+		} else {
+			title = "Новый префикс"
+		}
+		ctx = "верхний уровень"
+	case stateCommandForm:
+		if m.formMode == modeEdit {
+			title = "Изменение команды"
+		} else {
+			title = "Новая команда"
+		}
+		ctx = "в " + m.breadcrumb(m.cmdPath)
+	case stateFlagForm:
+		if m.formMode == modeEdit {
+			title = "Изменение флага"
+		} else {
+			title = "Новый флаг"
+		}
+		ctx = "у команды " + m.breadcrumb(m.flagCmdPath)
+	case stateVariableForm:
+		if m.formMode == modeEdit {
+			title = "Изменение переменной"
+		} else {
+			title = "Новая переменная"
+		}
+		ctx = "глобальная переменная"
+	}
+	return headerStyle.Render(title) + "  " + hintStyle.Render("· "+ctx)
+}
+
 func (m model) viewForm() string {
 	var b strings.Builder
+	b.WriteString(m.formHeader() + "\n\n")
 	b.WriteString(m.form.View())
 
 	if m.state == stateCommandForm && m.collision {

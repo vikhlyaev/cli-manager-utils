@@ -217,6 +217,59 @@ func TestImportAliases(t *testing.T) {
 	}
 }
 
+// TestFormHeaderContext — заголовок формы отражает режим, тип и путь в дереве.
+func TestFormHeaderContext(t *testing.T) {
+	cfg := &models.Config{
+		Variables: map[string]string{},
+		Prefixes: []models.Prefix{{Name: "av", Commands: []models.Command{
+			{Name: "db", Subcommands: []models.Command{
+				{Name: "up", Flags: []models.Flag{{Name: "--force"}}},
+			}},
+		}}},
+	}
+	m := NewModel(cfg)
+
+	m.state = stateCommandForm
+	m.formMode = modeCreate
+	m.cmdPath = []int{0} // внутри db
+	if h := m.formHeader(); !strings.Contains(h, "Новая команда") || !strings.Contains(h, "av db") {
+		t.Errorf("заголовок команды должен показывать режим и путь, получено %q", h)
+	}
+
+	m.state = stateFlagForm
+	m.formMode = modeEdit
+	m.flagCmdPath = []int{0, 0} // av db up
+	if h := m.formHeader(); !strings.Contains(h, "Изменение флага") || !strings.Contains(h, "av db up") {
+		t.Errorf("заголовок флага должен показывать путь команды, получено %q", h)
+	}
+}
+
+// TestEnterOpensFlagsForLeaf — на команде-листе Enter открывает её флаги
+// (регресс: после ввода вложенности Enter на листе должен вести к флагам,
+// а не к пустому списку подкоманд).
+func TestEnterOpensFlagsForLeaf(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	cfg := &models.Config{
+		Variables: map[string]string{},
+		Prefixes: []models.Prefix{{Name: "av", Commands: []models.Command{
+			{Name: "deploy", Run: "echo deploy", Flags: []models.Flag{{Name: "--force"}}},
+		}}},
+	}
+	m := NewModel(cfg)
+	m = feed(m,
+		tea.WindowSizeMsg{Width: 80, Height: 24},
+		tea.KeyMsg{Type: tea.KeyEnter}, // Префиксы
+		tea.KeyMsg{Type: tea.KeyEnter}, // Команды (deploy)
+		tea.KeyMsg{Type: tea.KeyEnter}, // deploy — лист, Enter -> флаги
+	)
+	if m.state != stateFlagList {
+		t.Fatalf("Enter на листе должен открывать флаги, состояние %v", m.state)
+	}
+	if c := m.commandAt(m.flagCmdPath); c == nil || len(c.Flags) != 1 {
+		t.Fatalf("ожидался 1 флаг у deploy, получено %+v", c)
+	}
+}
+
 // TestNestedCommandNavigation — Enter углубляется в подкоманды, Esc возвращает
 // на уровень выше.
 func TestNestedCommandNavigation(t *testing.T) {
@@ -277,8 +330,8 @@ func TestAddNestedSubcommand(t *testing.T) {
 	}
 }
 
-// TestFlagsForNestedLeaf — `f` открывает флаги команды на текущем уровне, путь
-// флагов учитывает вложенность.
+// TestFlagsForNestedLeaf — на листе Enter открывает флаги; путь флагов
+// учитывает вложенность.
 func TestFlagsForNestedLeaf(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	cfg := &models.Config{
@@ -293,9 +346,9 @@ func TestFlagsForNestedLeaf(t *testing.T) {
 	m = feed(m,
 		tea.WindowSizeMsg{Width: 80, Height: 24},
 		tea.KeyMsg{Type: tea.KeyEnter}, // Префиксы
-		tea.KeyMsg{Type: tea.KeyEnter}, // Команды (db)
+		tea.KeyMsg{Type: tea.KeyEnter}, // Команды (db) — ветвь
 		tea.KeyMsg{Type: tea.KeyEnter}, // вглубь db: [up]
-		runes("f"),                     // флаги up
+		tea.KeyMsg{Type: tea.KeyEnter}, // up — лист, Enter -> флаги
 	)
 	if m.state != stateFlagList {
 		t.Fatalf("ожидался список флагов, получено %v", m.state)
