@@ -31,11 +31,11 @@ func TestRenderTildeExpansion(t *testing.T) {
 
 func TestRenderConditionGatesCompletion(t *testing.T) {
 	out := ZshCompiler{}.render(sampleConfig())
-	if !strings.Contains(out, `if [[ -f docker-compose.yml ]]; then __commands+=("deploy:")`) {
+	if !strings.Contains(out, `if [[ -f docker-compose.yml ]]; then __c+=("deploy:"); fi`) {
 		t.Errorf("условие должно оборачивать добавление команды в автодополнение:\n%s", out)
 	}
 	// команда без условия добавляется безусловно
-	if !strings.Contains(out, `__commands+=("note:")`) {
+	if !strings.Contains(out, `__c+=("note:")`) {
 		t.Errorf("команда без условия должна добавляться безусловно:\n%s", out)
 	}
 }

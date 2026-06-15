@@ -64,60 +64,65 @@ func (bc BashCompiler) render(cfg *models.Config) string {
 	return b.String()
 }
 
-// renderPrefix генерирует шапку, справку, функцию-диспетчер (общие) и
+// renderPrefix генерирует шапку, дерево справок, рекурсивный диспетчер (общие) и
 // bash-специфичное автодополнение.
 func (bc BashCompiler) renderPrefix(b *strings.Builder, p models.Prefix) {
 	renderPrefixHeader(b, p)
-	renderHelp(b, p)
+	title := p.Name
+	if p.Description != "" {
+		title = p.Name + " — " + p.Description
+	}
+	renderHelpFns(b, "__"+p.Name, p.Name, title, p.Commands)
 	renderDispatcher(b, p)
 	bc.renderCompletion(b, p)
 }
 
-// renderCompletion генерирует bash-функцию автодополнения (через compgen) и её
-// регистрацию через complete. Команды с condition включаются в список дополнений
-// только если условие истинно в текущем контексте.
+// renderCompletion генерирует bash-функцию автодополнения через обход дерева
+// команд. Текущий уровень определяется путём уже введённых слов
+// (COMP_WORDS[1..CWORD-1]), что поддерживает произвольную вложенность.
 func (BashCompiler) renderCompletion(b *strings.Builder, p models.Prefix) {
 	fmt.Fprintf(b, "_%s_completions() {\n", p.Name)
-	b.WriteString("    local cur=\"${COMP_WORDS[COMP_CWORD]}\"\n\n")
-
-	// Первый аргумент — имя команды (с учётом контекстных условий).
-	b.WriteString("    if [[ $COMP_CWORD -eq 1 ]]; then\n")
-	b.WriteString("        local __cmds=\"\"\n")
-	for _, c := range p.Commands {
-		if c.Condition != "" {
-			fmt.Fprintf(b, "        if %s; then __cmds+=%s; fi\n", c.Condition, shQuote(c.Name+" "))
-		} else {
-			fmt.Fprintf(b, "        __cmds+=%s\n", shQuote(c.Name+" "))
-		}
-	}
-	b.WriteString("        COMPREPLY=( $(compgen -W \"$__cmds\" -- \"$cur\") )\n")
-	b.WriteString("        return 0\n")
-	b.WriteString("    fi\n\n")
-
-	// Дальше — флаги/файлы конкретной команды.
-	b.WriteString("    case \"${COMP_WORDS[1]}\" in\n")
-	for _, c := range p.Commands {
-		if len(c.Flags) == 0 && !c.AcceptsArgs {
-			continue
-		}
-		fmt.Fprintf(b, "        %s)\n", shCasePattern(c.Name))
-		if len(c.Flags) > 0 {
-			names := make([]string, len(c.Flags))
-			for i, f := range c.Flags {
-				names[i] = f.Name
-			}
-			fmt.Fprintf(b, "            COMPREPLY=( $(compgen -W %s -- \"$cur\") )\n",
-				shQuote(strings.Join(names, " ")))
-		}
-		if c.AcceptsArgs {
-			b.WriteString("            COMPREPLY+=( $(compgen -f -- \"$cur\") )\n")
-		}
-		b.WriteString("            ;;\n")
-	}
+	b.WriteString("    local cur=\"${COMP_WORDS[COMP_CWORD]}\"\n")
+	b.WriteString("    local __path=\"${COMP_WORDS[*]:1:COMP_CWORD-1}\"\n")
+	b.WriteString("    case \"$__path\" in\n")
+	renderCompletionTree(b, p.Commands, "", bashEmitter{})
 	b.WriteString("    esac\n")
 	b.WriteString("}\n")
 
 	// Регистрируем автодополнение, если доступна команда complete.
 	fmt.Fprintf(b, "if type complete >/dev/null 2>&1; then complete -F _%s_completions %s; fi\n\n",
 		p.Name, p.Name)
+}
+
+// bashEmitter выводит кандидатов автодополнения средствами bash (compgen).
+type bashEmitter struct{}
+
+func (bashEmitter) emitCommands(b *strings.Builder, path string, cmds []models.Command) {
+	fmt.Fprintf(b, "        %s)\n", shCasePattern(path))
+	b.WriteString("            local __c=\"\"\n")
+	for _, c := range cmds {
+		if c.Condition != "" {
+			fmt.Fprintf(b, "            if %s; then __c+=%s; fi\n", c.Condition, shQuote(c.Name+" "))
+		} else {
+			fmt.Fprintf(b, "            __c+=%s\n", shQuote(c.Name+" "))
+		}
+	}
+	b.WriteString("            COMPREPLY=( $(compgen -W \"$__c\" -- \"$cur\") )\n")
+	b.WriteString("            ;;\n")
+}
+
+func (bashEmitter) emitLeaf(b *strings.Builder, path string, c models.Command) {
+	fmt.Fprintf(b, "        %s)\n", shCasePattern(path))
+	if len(c.Flags) > 0 {
+		names := make([]string, len(c.Flags))
+		for i, f := range c.Flags {
+			names[i] = f.Name
+		}
+		fmt.Fprintf(b, "            COMPREPLY=( $(compgen -W %s -- \"$cur\") )\n",
+			shQuote(strings.Join(names, " ")))
+	}
+	if c.AcceptsArgs {
+		b.WriteString("            COMPREPLY+=( $(compgen -f -- \"$cur\") )\n")
+	}
+	b.WriteString("            ;;\n")
 }

@@ -65,64 +65,28 @@ func (z ZshCompiler) render(cfg *models.Config) string {
 	return b.String()
 }
 
-// renderPrefix генерирует шапку, справку, функцию-диспетчер (общие) и
+// renderPrefix генерирует шапку, дерево справок, рекурсивный диспетчер (общие) и
 // zsh-специфичное автодополнение.
 func (z ZshCompiler) renderPrefix(b *strings.Builder, p models.Prefix) {
 	renderPrefixHeader(b, p)
-	renderHelp(b, p)
+	title := p.Name
+	if p.Description != "" {
+		title = p.Name + " — " + p.Description
+	}
+	renderHelpFns(b, "__"+p.Name, p.Name, title, p.Commands)
 	renderDispatcher(b, p)
 	z.renderCompletion(b, p)
 }
 
-// renderCompletion генерирует функцию автодополнения (через _arguments/_describe)
-// и её регистрацию через compdef. Команды с condition включаются в список
-// дополнений только если условие истинно в текущем контексте.
+// renderCompletion генерирует функцию автодополнения через обход дерева команд.
+// Текущий уровень определяется путём уже введённых слов ($words[2,CURRENT-1]),
+// поэтому поддерживается произвольная вложенность подкоманд. Команды с condition
+// предлагаются только если условие истинно.
 func (ZshCompiler) renderCompletion(b *strings.Builder, p models.Prefix) {
 	fmt.Fprintf(b, "_%s_completions() {\n", p.Name)
-	b.WriteString("    local curcontext=\"$curcontext\" state line\n")
-	b.WriteString("    _arguments -C \\\n")
-	b.WriteString("        '1: :->cmds' \\\n")
-	b.WriteString("        '*::arg:->args'\n\n")
-	b.WriteString("    case \"$state\" in\n")
-
-	// Список команд (с учётом контекстных условий).
-	b.WriteString("        cmds)\n")
-	b.WriteString("            local -a __commands\n")
-	for _, c := range p.Commands {
-		entry := fmt.Sprintf("%s:%s", c.Name, c.Description)
-		if c.Condition != "" {
-			fmt.Fprintf(b, "            if %s; then __commands+=(%s); fi\n",
-				c.Condition, shQuote(entry))
-		} else {
-			fmt.Fprintf(b, "            __commands+=(%s)\n", shQuote(entry))
-		}
-	}
-	b.WriteString("            _describe -t commands 'команда' __commands\n")
-	b.WriteString("            ;;\n")
-
-	// Автодополнение аргументов/флагов конкретной команды.
-	b.WriteString("        args)\n")
-	b.WriteString("            case \"$line[1]\" in\n")
-	for _, c := range p.Commands {
-		if len(c.Flags) == 0 && !c.AcceptsArgs {
-			continue
-		}
-		fmt.Fprintf(b, "                %s)\n", shCasePattern(c.Name))
-		if len(c.Flags) > 0 {
-			b.WriteString("                    local -a __flags\n")
-			for _, f := range c.Flags {
-				entry := fmt.Sprintf("%s:%s", f.Name, f.Description)
-				fmt.Fprintf(b, "                    __flags+=(%s)\n", shQuote(entry))
-			}
-			b.WriteString("                    _describe -t flags 'флаг' __flags\n")
-		}
-		if c.AcceptsArgs {
-			b.WriteString("                    _files\n")
-		}
-		b.WriteString("                    ;;\n")
-	}
-	b.WriteString("            esac\n")
-	b.WriteString("            ;;\n")
+	b.WriteString("    local __path=\"${(j: :)words[2,CURRENT-1]}\"\n")
+	b.WriteString("    case \"$__path\" in\n")
+	renderCompletionTree(b, p.Commands, "", zshEmitter{})
 	b.WriteString("    esac\n")
 	b.WriteString("}\n")
 
@@ -130,4 +94,38 @@ func (ZshCompiler) renderCompletion(b *strings.Builder, p models.Prefix) {
 	// (compdef доступна) — иначе source в неинтерактивном zsh упадёт с ошибкой.
 	fmt.Fprintf(b, "if typeset -f compdef >/dev/null; then compdef _%s_completions %s; fi\n\n",
 		p.Name, p.Name)
+}
+
+// zshEmitter выводит кандидатов автодополнения средствами zsh (_describe/_files).
+type zshEmitter struct{}
+
+func (zshEmitter) emitCommands(b *strings.Builder, path string, cmds []models.Command) {
+	fmt.Fprintf(b, "        %s)\n", shCasePattern(path))
+	b.WriteString("            local -a __c\n")
+	for _, c := range cmds {
+		entry := fmt.Sprintf("%s:%s", c.Name, c.Description)
+		if c.Condition != "" {
+			fmt.Fprintf(b, "            if %s; then __c+=(%s); fi\n", c.Condition, shQuote(entry))
+		} else {
+			fmt.Fprintf(b, "            __c+=(%s)\n", shQuote(entry))
+		}
+	}
+	b.WriteString("            _describe -t commands 'команда' __c\n")
+	b.WriteString("            ;;\n")
+}
+
+func (zshEmitter) emitLeaf(b *strings.Builder, path string, c models.Command) {
+	fmt.Fprintf(b, "        %s)\n", shCasePattern(path))
+	if len(c.Flags) > 0 {
+		b.WriteString("            local -a __f\n")
+		for _, f := range c.Flags {
+			entry := fmt.Sprintf("%s:%s", f.Name, f.Description)
+			fmt.Fprintf(b, "            __f+=(%s)\n", shQuote(entry))
+		}
+		b.WriteString("            _describe -t flags 'флаг' __f\n")
+	}
+	if c.AcceptsArgs {
+		b.WriteString("            _files\n")
+	}
+	b.WriteString("            ;;\n")
 }
