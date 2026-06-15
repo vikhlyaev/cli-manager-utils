@@ -217,6 +217,97 @@ func TestImportAliases(t *testing.T) {
 	}
 }
 
+// TestNestedCommandNavigation — Enter углубляется в подкоманды, Esc возвращает
+// на уровень выше.
+func TestNestedCommandNavigation(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	cfg := &models.Config{
+		Variables: map[string]string{},
+		Prefixes: []models.Prefix{{Name: "av", Commands: []models.Command{
+			{Name: "db", Subcommands: []models.Command{{Name: "migrate"}}},
+		}}},
+	}
+	m := NewModel(cfg)
+	m = feed(m,
+		tea.WindowSizeMsg{Width: 80, Height: 24},
+		tea.KeyMsg{Type: tea.KeyEnter}, // -> Префиксы
+		tea.KeyMsg{Type: tea.KeyEnter}, // -> Команды (av): [db]
+		tea.KeyMsg{Type: tea.KeyEnter}, // вглубь db: [migrate]
+	)
+	if len(m.cmdPath) != 1 || m.cmdPath[0] != 0 {
+		t.Fatalf("ожидался cmdPath [0] (db), получено %v", m.cmdPath)
+	}
+	if got := len(*m.childrenPtr()); got != 1 || (*m.childrenPtr())[0].Name != "migrate" {
+		t.Fatalf("на уровне db ожидалась подкоманда migrate, получено %+v", *m.childrenPtr())
+	}
+
+	m = feed(m, tea.KeyMsg{Type: tea.KeyEsc}) // назад на верхний уровень
+	if len(m.cmdPath) != 0 || m.state != stateCommandList {
+		t.Fatalf("после Esc ожидался верхний уровень команд, cmdPath=%v state=%v", m.cmdPath, m.state)
+	}
+}
+
+// TestAddNestedSubcommand — добавление команды на вложенном уровне попадает в
+// Subcommands родителя, не трогая верхний уровень.
+func TestAddNestedSubcommand(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	cfg := &models.Config{
+		Variables: map[string]string{},
+		Prefixes: []models.Prefix{{Name: "av", Commands: []models.Command{
+			{Name: "db", Subcommands: []models.Command{{Name: "migrate"}}},
+		}}},
+	}
+	m := NewModel(cfg)
+	m = feed(m,
+		tea.WindowSizeMsg{Width: 80, Height: 24},
+		tea.KeyMsg{Type: tea.KeyEnter}, // Префиксы
+		tea.KeyMsg{Type: tea.KeyEnter}, // Команды (db)
+		tea.KeyMsg{Type: tea.KeyEnter}, // вглубь db
+		runes("n"),                     // новая подкоманда
+		runes("seed"),                  // имя
+	)
+	m.commitForm()
+
+	subs := m.cfg.Prefixes[0].Commands[0].Subcommands
+	if len(subs) != 2 || subs[1].Name != "seed" {
+		t.Fatalf("ожидались migrate,seed под db; получено %+v", subs)
+	}
+	if len(m.cfg.Prefixes[0].Commands) != 1 {
+		t.Errorf("верхний уровень не должен меняться, получено %d команд", len(m.cfg.Prefixes[0].Commands))
+	}
+}
+
+// TestFlagsForNestedLeaf — `f` открывает флаги команды на текущем уровне, путь
+// флагов учитывает вложенность.
+func TestFlagsForNestedLeaf(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	cfg := &models.Config{
+		Variables: map[string]string{},
+		Prefixes: []models.Prefix{{Name: "av", Commands: []models.Command{
+			{Name: "db", Subcommands: []models.Command{
+				{Name: "up", Flags: []models.Flag{{Name: "--force"}}},
+			}},
+		}}},
+	}
+	m := NewModel(cfg)
+	m = feed(m,
+		tea.WindowSizeMsg{Width: 80, Height: 24},
+		tea.KeyMsg{Type: tea.KeyEnter}, // Префиксы
+		tea.KeyMsg{Type: tea.KeyEnter}, // Команды (db)
+		tea.KeyMsg{Type: tea.KeyEnter}, // вглубь db: [up]
+		runes("f"),                     // флаги up
+	)
+	if m.state != stateFlagList {
+		t.Fatalf("ожидался список флагов, получено %v", m.state)
+	}
+	if len(m.flagCmdPath) != 2 || m.flagCmdPath[0] != 0 || m.flagCmdPath[1] != 0 {
+		t.Fatalf("ожидался flagCmdPath [0 0] (db up), получено %v", m.flagCmdPath)
+	}
+	if c := m.commandAt(m.flagCmdPath); c == nil || len(c.Flags) != 1 || c.Flags[0].Name != "--force" {
+		t.Fatalf("флаги команды up не найдены по пути: %+v", c)
+	}
+}
+
 // TestVariablesPanel — панель подсказки перечисляет определённые переменные
 // в форме ${NAME} и пуста, когда переменных нет.
 func TestVariablesPanel(t *testing.T) {

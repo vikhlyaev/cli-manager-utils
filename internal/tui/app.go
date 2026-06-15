@@ -87,7 +87,9 @@ type model struct {
 	variablesList list.Model
 
 	activePrefixIdx  int
-	activeCommandIdx int
+	activeCommandIdx int   // выбранный/редактируемый индекс в текущем списке команд
+	cmdPath          []int // путь индексов до узла, чьи дети показаны в списке команд
+	flagCmdPath      []int // путь до команды, чьи флаги показаны в списке флагов
 
 	// форма и её буферы
 	form     *huh.Form
@@ -165,20 +167,78 @@ func (m *model) refreshPrefixList() {
 	m.prefixesList.SetItems(items)
 }
 
+// childrenPtr возвращает указатель на срез команд, отображаемый сейчас в списке
+// команд (дети узла, адресованного cmdPath; при пустом пути — команды префикса).
+func (m *model) childrenPtr() *[]models.Command {
+	cmds := &m.cfg.Prefixes[m.activePrefixIdx].Commands
+	for _, idx := range m.cmdPath {
+		if idx >= 0 && idx < len(*cmds) {
+			cmds = &(*cmds)[idx].Subcommands
+		}
+	}
+	return cmds
+}
+
+// commandAt возвращает указатель на команду по пути индексов (относительно
+// активного префикса) или nil, если путь невалиден.
+func (m *model) commandAt(path []int) *models.Command {
+	cmds := &m.cfg.Prefixes[m.activePrefixIdx].Commands
+	var cmd *models.Command
+	for _, idx := range path {
+		if idx < 0 || idx >= len(*cmds) {
+			return nil
+		}
+		cmd = &(*cmds)[idx]
+		cmds = &cmd.Subcommands
+	}
+	return cmd
+}
+
+// breadcrumb строит человекочитаемый путь ("av db migrate") по пути индексов.
+func (m *model) breadcrumb(path []int) string {
+	parts := []string{m.cfg.Prefixes[m.activePrefixIdx].Name}
+	cmds := m.cfg.Prefixes[m.activePrefixIdx].Commands
+	for _, idx := range path {
+		if idx < 0 || idx >= len(cmds) {
+			break
+		}
+		parts = append(parts, cmds[idx].Name)
+		cmds = cmds[idx].Subcommands
+	}
+	return strings.Join(parts, " ")
+}
+
+// validPathPrefix усекает путь до первого невалидного индекса (после изменения
+// дерева, напр. при undo).
+func (m *model) validPathPrefix(path []int) []int {
+	cmds := m.cfg.Prefixes[m.activePrefixIdx].Commands
+	out := path[:0:0]
+	for _, idx := range path {
+		if idx < 0 || idx >= len(cmds) {
+			break
+		}
+		out = append(out, idx)
+		cmds = cmds[idx].Subcommands
+	}
+	return out
+}
+
 func (m *model) refreshCommandList() {
-	p := m.cfg.Prefixes[m.activePrefixIdx]
-	m.commandsList.Title = fmt.Sprintf("'%s' · Команды", p.Name)
-	items := make([]list.Item, len(p.Commands))
-	for i, c := range p.Commands {
+	m.commandsList.Title = fmt.Sprintf("'%s' · Команды", m.breadcrumb(m.cmdPath))
+	cmds := *m.childrenPtr()
+	items := make([]list.Item, len(cmds))
+	for i, c := range cmds {
 		items[i] = commandItem{cmd: c}
 	}
 	m.commandsList.SetItems(items)
 }
 
 func (m *model) refreshFlagList() {
-	p := m.cfg.Prefixes[m.activePrefixIdx]
-	c := p.Commands[m.activeCommandIdx]
-	m.flagsList.Title = fmt.Sprintf("'%s %s' · Флаги", p.Name, c.Name)
+	c := m.commandAt(m.flagCmdPath)
+	if c == nil {
+		return
+	}
+	m.flagsList.Title = fmt.Sprintf("'%s' · Флаги", m.breadcrumb(m.flagCmdPath))
 	items := make([]list.Item, len(c.Flags))
 	for i, f := range c.Flags {
 		items[i] = flagItem{flag: f}
@@ -268,18 +328,19 @@ func (m *model) clampAndRefresh() {
 	m.refreshPrefixList()
 	m.refreshVariableList()
 
-	if len(m.cfg.Prefixes) > 0 {
-		cmds := m.cfg.Prefixes[m.activePrefixIdx].Commands
-		if m.activeCommandIdx >= len(cmds) {
-			m.activeCommandIdx = len(cmds) - 1
-		}
-		if m.activeCommandIdx < 0 {
-			m.activeCommandIdx = 0
-		}
-		m.refreshCommandList()
-		if len(cmds) > 0 {
-			m.refreshFlagList()
-		}
+	if len(m.cfg.Prefixes) == 0 {
+		m.cmdPath = nil
+		m.flagCmdPath = nil
+		return
+	}
+
+	// Усекаем пути до валидных после возможного изменения дерева.
+	m.cmdPath = m.validPathPrefix(m.cmdPath)
+	m.refreshCommandList()
+	if m.commandAt(m.flagCmdPath) != nil {
+		m.refreshFlagList()
+	} else {
+		m.flagCmdPath = nil
 	}
 }
 
@@ -491,7 +552,9 @@ func (m *model) updatePrefixList(key tea.KeyMsg) (tea.Cmd, bool) {
 	case "enter":
 		if _, ok := m.prefixesList.SelectedItem().(prefixItem); ok {
 			m.activePrefixIdx = m.prefixesList.Index()
+			m.cmdPath = nil
 			m.refreshCommandList()
+			m.commandsList.Select(0)
 			m.state = stateCommandList
 		}
 		return nil, true
@@ -502,8 +565,16 @@ func (m *model) updatePrefixList(key tea.KeyMsg) (tea.Cmd, bool) {
 func (m *model) updateCommandList(key tea.KeyMsg) (tea.Cmd, bool) {
 	switch key.String() {
 	case "esc":
-		m.refreshPrefixList()
-		m.state = statePrefixList
+		// Выходим на уровень выше: либо к родительской команде, либо к префиксам.
+		if len(m.cmdPath) > 0 {
+			child := m.cmdPath[len(m.cmdPath)-1]
+			m.cmdPath = m.cmdPath[:len(m.cmdPath)-1]
+			m.refreshCommandList()
+			m.commandsList.Select(child)
+		} else {
+			m.refreshPrefixList()
+			m.state = statePrefixList
+		}
 		return nil, true
 	case "n":
 		m.newFormBuffers()
@@ -514,7 +585,7 @@ func (m *model) updateCommandList(key tea.KeyMsg) (tea.Cmd, bool) {
 	case "e":
 		if _, ok := m.commandsList.SelectedItem().(commandItem); ok {
 			m.activeCommandIdx = m.commandsList.Index()
-			c := m.cfg.Prefixes[m.activePrefixIdx].Commands[m.activeCommandIdx]
+			c := (*m.childrenPtr())[m.activeCommandIdx]
 			m.newFormBuffers()
 			m.fb.name = c.Name
 			m.fb.description = c.Description
@@ -543,11 +614,23 @@ func (m *model) updateCommandList(key tea.KeyMsg) (tea.Cmd, bool) {
 	case "J", "shift+down":
 		m.moveCommand(1)
 		return nil, true
-	case "enter":
+	case "f":
+		// Открыть флаги выбранной команды (актуально для листьев).
 		if _, ok := m.commandsList.SelectedItem().(commandItem); ok {
-			m.activeCommandIdx = m.commandsList.Index()
+			idx := m.commandsList.Index()
+			m.flagCmdPath = append(append([]int{}, m.cmdPath...), idx)
 			m.refreshFlagList()
+			m.flagsList.Select(0)
 			m.state = stateFlagList
+		}
+		return nil, true
+	case "enter":
+		// Углубиться в подкоманды выбранной команды.
+		if _, ok := m.commandsList.SelectedItem().(commandItem); ok {
+			idx := m.commandsList.Index()
+			m.cmdPath = append(m.cmdPath, idx)
+			m.refreshCommandList()
+			m.commandsList.Select(0)
 		}
 		return nil, true
 	}
@@ -567,18 +650,20 @@ func (m *model) updateFlagList(key tea.KeyMsg) (tea.Cmd, bool) {
 		m.state = stateFlagForm
 		return cmd, true
 	case "e":
-		if _, ok := m.flagsList.SelectedItem().(flagItem); ok {
-			idx := m.flagsList.Index()
-			f := m.cfg.Prefixes[m.activePrefixIdx].Commands[m.activeCommandIdx].Flags[idx]
-			m.newFormBuffers()
-			m.editKey = fmt.Sprintf("%d", idx)
-			m.fb.name = f.Name
-			m.fb.description = f.Description
-			m.fb.run = f.Run
-			cmd := m.initFlagForm()
-			m.formMode = modeEdit
-			m.state = stateFlagForm
-			return cmd, true
+		if cmd := m.commandAt(m.flagCmdPath); cmd != nil {
+			if _, ok := m.flagsList.SelectedItem().(flagItem); ok {
+				idx := m.flagsList.Index()
+				f := cmd.Flags[idx]
+				m.newFormBuffers()
+				m.editKey = fmt.Sprintf("%d", idx)
+				m.fb.name = f.Name
+				m.fb.description = f.Description
+				m.fb.run = f.Run
+				cmd := m.initFlagForm()
+				m.formMode = modeEdit
+				m.state = stateFlagForm
+				return cmd, true
+			}
 		}
 	case "d":
 		if item, ok := m.flagsList.SelectedItem().(flagItem); ok {
@@ -642,21 +727,21 @@ func (m *model) performDelete() {
 			m.refreshPrefixList()
 		}
 	case stateCommandList:
-		cs := m.cfg.Prefixes[m.activePrefixIdx].Commands
+		children := m.childrenPtr()
 		idx := m.commandsList.Index()
-		if idx >= 0 && idx < len(cs) {
-			m.cfg.Prefixes[m.activePrefixIdx].Commands = append(cs[:idx], cs[idx+1:]...)
+		if idx >= 0 && idx < len(*children) {
+			*children = append((*children)[:idx], (*children)[idx+1:]...)
 			m.persist()
 			m.refreshCommandList()
 		}
 	case stateFlagList:
-		fs := m.cfg.Prefixes[m.activePrefixIdx].Commands[m.activeCommandIdx].Flags
-		idx := m.flagsList.Index()
-		if idx >= 0 && idx < len(fs) {
-			m.cfg.Prefixes[m.activePrefixIdx].Commands[m.activeCommandIdx].Flags =
-				append(fs[:idx], fs[idx+1:]...)
-			m.persist()
-			m.refreshFlagList()
+		if cmd := m.commandAt(m.flagCmdPath); cmd != nil {
+			idx := m.flagsList.Index()
+			if idx >= 0 && idx < len(cmd.Flags) {
+				cmd.Flags = append(cmd.Flags[:idx], cmd.Flags[idx+1:]...)
+				m.persist()
+				m.refreshFlagList()
+			}
 		}
 	case stateVariableList:
 		if item, ok := m.variablesList.SelectedItem().(variableItem); ok {
@@ -699,7 +784,7 @@ func (m *model) movePrefix(delta int) {
 }
 
 func (m *model) moveCommand(delta int) {
-	cs := m.cfg.Prefixes[m.activePrefixIdx].Commands
+	cs := *m.childrenPtr()
 	i := m.commandsList.Index()
 	j := i + delta
 	if i < 0 || j < 0 || j >= len(cs) {
@@ -713,7 +798,11 @@ func (m *model) moveCommand(delta int) {
 }
 
 func (m *model) moveFlag(delta int) {
-	fs := m.cfg.Prefixes[m.activePrefixIdx].Commands[m.activeCommandIdx].Flags
+	cmd := m.commandAt(m.flagCmdPath)
+	if cmd == nil {
+		return
+	}
+	fs := cmd.Flags
 	i := m.flagsList.Index()
 	j := i + delta
 	if i < 0 || j < 0 || j >= len(fs) {
@@ -880,31 +969,33 @@ func (m *model) commitForm() {
 			AcceptsArgs: m.fb.acceptsArgs,
 			Condition:   m.fb.condition,
 		}
-		cmds := m.cfg.Prefixes[m.activePrefixIdx].Commands
+		children := m.childrenPtr()
 		if m.formMode == modeEdit {
-			c.Flags = cmds[m.activeCommandIdx].Flags // сохраняем существующие флаги
-			cmds[m.activeCommandIdx] = c
+			old := (*children)[m.activeCommandIdx]
+			c.Flags = old.Flags             // сохраняем существующие флаги
+			c.Subcommands = old.Subcommands // и вложенные подкоманды
+			(*children)[m.activeCommandIdx] = c
 		} else {
-			m.cfg.Prefixes[m.activePrefixIdx].Commands = append(cmds, c)
+			*children = append(*children, c)
 		}
 		m.persist()
 		m.refreshCommandList()
 		m.state = stateCommandList
 
 	case stateFlagForm:
-		f := models.Flag{
-			Name:        m.fb.name,
-			Description: m.fb.description,
-			Run:         m.fb.run,
-		}
-		flags := m.cfg.Prefixes[m.activePrefixIdx].Commands[m.activeCommandIdx].Flags
-		if m.formMode == modeEdit {
-			var idx int
-			fmt.Sscanf(m.editKey, "%d", &idx)
-			flags[idx] = f
-		} else {
-			m.cfg.Prefixes[m.activePrefixIdx].Commands[m.activeCommandIdx].Flags =
-				append(flags, f)
+		if cmd := m.commandAt(m.flagCmdPath); cmd != nil {
+			f := models.Flag{
+				Name:        m.fb.name,
+				Description: m.fb.description,
+				Run:         m.fb.run,
+			}
+			if m.formMode == modeEdit {
+				var idx int
+				fmt.Sscanf(m.editKey, "%d", &idx)
+				cmd.Flags[idx] = f
+			} else {
+				cmd.Flags = append(cmd.Flags, f)
+			}
 		}
 		m.persist()
 		m.refreshFlagList()
@@ -935,7 +1026,7 @@ func (m model) View() string {
 			"[n] новый  [e] изменить  [d] удалить  [⇧↑/↓] порядок  [p] zsh  [i] импорт  [u] отмена  [enter] открыть  [esc] меню")
 	case stateCommandList:
 		return m.listView(m.commandsList.View(),
-			"[n] новая  [e] изменить  [d] удалить  [⇧↑/↓] порядок  [p] zsh  [u] отмена  [enter] флаги  [esc] назад")
+			"[n] новая  [e] изменить  [d] удалить  [⇧↑/↓] порядок  [f] флаги  [p] zsh  [u] отмена  [enter] вглубь  [esc] назад")
 	case stateFlagList:
 		return m.listView(m.flagsList.View(),
 			"[n] новый  [e] изменить  [d] удалить  [⇧↑/↓] порядок  [u] отмена  [esc] назад")

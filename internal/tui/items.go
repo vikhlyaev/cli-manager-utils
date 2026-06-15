@@ -23,13 +23,23 @@ func (i prefixItem) FilterValue() string { return i.prefix.Name }
 // commandItem — элемент списка команд.
 type commandItem struct{ cmd models.Command }
 
-func (i commandItem) Title() string { return i.cmd.Name }
+func (i commandItem) Title() string {
+	if i.cmd.IsBranch() {
+		return i.cmd.Name + " ▸" // маркер ветви с подкомандами
+	}
+	return i.cmd.Name
+}
 func (i commandItem) Description() string {
 	desc := i.cmd.Description
 	if desc == "" {
 		desc = i.cmd.Run
 	}
-	meta := fmt.Sprintf("флагов: %d", len(i.cmd.Flags))
+	var meta string
+	if i.cmd.IsBranch() {
+		meta = fmt.Sprintf("подкоманд: %d", len(i.cmd.Subcommands))
+	} else {
+		meta = fmt.Sprintf("флагов: %d", len(i.cmd.Flags))
+	}
 	if i.cmd.AcceptsArgs {
 		meta += " · принимает аргументы"
 	}
