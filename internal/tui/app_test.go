@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"strings"
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -148,6 +149,20 @@ func TestPreviewOpensAndReturns(t *testing.T) {
 	m = feed(m, tea.KeyMsg{Type: tea.KeyEsc})
 	if m.state != statePrefixList {
 		t.Fatalf("после Esc ожидался список префиксов, получено %v", m.state)
+	}
+}
+
+// TestVariablesPanel — панель подсказки перечисляет определённые переменные
+// в форме ${NAME} и пуста, когда переменных нет.
+func TestVariablesPanel(t *testing.T) {
+	m := NewModel(&models.Config{Variables: map[string]string{"B": "2", "A": "1"}})
+	p := m.variablesPanel()
+	if !strings.Contains(p, "${A}") || !strings.Contains(p, "${B}") {
+		t.Fatalf("панель должна содержать ${A} и ${B}, получено: %q", p)
+	}
+	m2 := NewModel(&models.Config{Variables: map[string]string{}})
+	if m2.variablesPanel() != "" {
+		t.Errorf("без переменных панель должна быть пустой, получено: %q", m2.variablesPanel())
 	}
 }
 

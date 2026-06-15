@@ -902,6 +902,25 @@ func (m model) listView(body, hints string) string {
 	return docStyle.Render(out)
 }
 
+// variablesPanel возвращает подсказку со списком определённых глобальных
+// переменных в форме ${NAME} — чтобы при наборе действия их не приходилось
+// держать в голове. Пусто, если переменных нет.
+func (m model) variablesPanel() string {
+	if len(m.cfg.Variables) == 0 {
+		return ""
+	}
+	keys := make([]string, 0, len(m.cfg.Variables))
+	for k := range m.cfg.Variables {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	chips := make([]string, len(keys))
+	for i, k := range keys {
+		chips[i] = "${" + k + "}"
+	}
+	return hintStyle.Render("Переменные: " + strings.Join(chips, "  "))
+}
+
 func (m model) statusLine() string {
 	if m.statusErr {
 		return errStyle.Render(m.status)
@@ -921,6 +940,12 @@ func (m model) viewForm() string {
 
 	if (m.state == stateCommandForm || m.state == stateFlagForm) && m.syntaxErr != "" {
 		b.WriteString("\n" + errStyle.Render("✗ синтаксис bash: "+m.syntaxErr))
+	}
+
+	if m.state == stateCommandForm || m.state == stateFlagForm {
+		if panel := m.variablesPanel(); panel != "" {
+			b.WriteString("\n" + panel)
+		}
 	}
 
 	if m.testOutput != "" {
