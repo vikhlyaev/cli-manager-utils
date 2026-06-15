@@ -26,6 +26,9 @@ type Prefix struct {
 
 // Config — корневая структура конфигурации cli-manager.
 type Config struct {
+	// Shell — целевая оболочка для генерации скрипта ("zsh" или "bash").
+	// Пустое значение трактуется как "zsh" (поведение по умолчанию).
+	Shell     string            `yaml:"shell,omitempty"`
 	Variables map[string]string `yaml:"variables,omitempty"`
 	Prefixes  []Prefix          `yaml:"prefixes"`
 }

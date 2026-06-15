@@ -54,7 +54,19 @@ const (
 	modeEdit
 )
 
-var mainMenuItems = []string{"Префиксы", "Глобальные переменные"}
+// shellName возвращает нормализованное имя целевой оболочки ("zsh" по умолчанию).
+func (m model) shellName() string {
+	if strings.ToLower(strings.TrimSpace(m.cfg.Shell)) == "bash" {
+		return "bash"
+	}
+	return "zsh"
+}
+
+// menuItems формирует пункты главного меню; третий пункт показывает и переключает
+// целевую оболочку.
+func (m model) menuItems() []string {
+	return []string{"Префиксы", "Глобальные переменные", "Оболочка: " + m.shellName()}
+}
 
 type model struct {
 	state  sessionState
@@ -189,7 +201,7 @@ func (m *model) persist() {
 		m.statusErr = true
 		return
 	}
-	if err := (compiler.ZshCompiler{}).Generate(m.cfg); err != nil {
+	if err := compiler.For(m.cfg.Shell).Generate(m.cfg); err != nil {
 		m.status = "Ошибка генерации zsh: " + err.Error()
 		m.statusErr = true
 		return
@@ -228,7 +240,7 @@ func (m *model) undo() {
 		m.statusErr = true
 		return
 	}
-	if err := (compiler.ZshCompiler{}).Generate(m.cfg); err != nil {
+	if err := compiler.For(m.cfg.Shell).Generate(m.cfg); err != nil {
 		m.status = "Ошибка генерации zsh: " + err.Error()
 		m.statusErr = true
 		return
@@ -393,7 +405,7 @@ func (m model) updateMainMenu(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.menuIndex--
 		}
 	case "down", "j":
-		if m.menuIndex < len(mainMenuItems)-1 {
+		if m.menuIndex < len(m.menuItems())-1 {
 			m.menuIndex++
 		}
 	case "q":
@@ -406,9 +418,22 @@ func (m model) updateMainMenu(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 		case 1:
 			m.refreshVariableList()
 			m.state = stateVariableList
+		case 2:
+			m.toggleShell()
 		}
 	}
 	return m, nil
+}
+
+// toggleShell переключает целевую оболочку zsh↔bash и пересохраняет конфигурацию
+// (что регенерирует скрипт уже выбранным компилятором).
+func (m *model) toggleShell() {
+	if m.shellName() == "zsh" {
+		m.cfg.Shell = "bash"
+	} else {
+		m.cfg.Shell = "zsh"
+	}
+	m.persist()
 }
 
 // --- Списки: возвращают (cmd, handled) ---
@@ -444,7 +469,7 @@ func (m *model) updatePrefixList(key tea.KeyMsg) (tea.Cmd, bool) {
 		return nil, true
 	case "p":
 		if item, ok := m.prefixesList.SelectedItem().(prefixItem); ok {
-			content := (compiler.ZshCompiler{}).RenderPrefix(item.prefix)
+			content := compiler.For(m.cfg.Shell).RenderPrefix(item.prefix)
 			m.openPreview("Предпросмотр zsh · префикс '"+item.prefix.Name+"'", content)
 		}
 		return nil, true
@@ -500,7 +525,7 @@ func (m *model) updateCommandList(key tea.KeyMsg) (tea.Cmd, bool) {
 		return nil, true
 	case "p":
 		p := m.cfg.Prefixes[m.activePrefixIdx]
-		content := (compiler.ZshCompiler{}).RenderPrefix(p)
+		content := compiler.For(m.cfg.Shell).RenderPrefix(p)
 		m.openPreview("Предпросмотр zsh · префикс '"+p.Name+"'", content)
 		return nil, true
 	case "K", "shift+up":
@@ -861,7 +886,7 @@ func (m model) View() string {
 // viewPreview отрисовывает экран предпросмотра сгенерированного zsh с заголовком,
 // путём итогового файла (№7) и прокручиваемым содержимым.
 func (m model) viewPreview() string {
-	path := (compiler.ZshCompiler{}).OutputPath()
+	path := compiler.For(m.cfg.Shell).OutputPath()
 	header := headerStyle.Render(m.previewTitle) + "\n" +
 		hintStyle.Render("Файл: "+path)
 	hints := hintStyle.Render("[↑/↓] прокрутка  [esc] назад")
@@ -871,8 +896,8 @@ func (m model) viewPreview() string {
 func (m model) viewMainMenu() string {
 	var b strings.Builder
 	b.WriteString(headerStyle.Render("CLI Manager") + "\n")
-	b.WriteString(hintStyle.Render("Конструктор составных команд для ZSH") + "\n\n")
-	for i, item := range mainMenuItems {
+	b.WriteString(hintStyle.Render("Конструктор составных команд для "+strings.ToUpper(m.shellName())) + "\n\n")
+	for i, item := range m.menuItems() {
 		cursor := "  "
 		line := item
 		if i == m.menuIndex {

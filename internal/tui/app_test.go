@@ -152,6 +152,28 @@ func TestPreviewOpensAndReturns(t *testing.T) {
 	}
 }
 
+// TestToggleShell — пункт «Оболочка» в главном меню переключает zsh↔bash и
+// записывает выбор в конфиг.
+func TestToggleShell(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	m := NewModel(&models.Config{Variables: map[string]string{}})
+	if m.shellName() != "zsh" {
+		t.Fatalf("по умолчанию ожидался zsh, получено %s", m.shellName())
+	}
+	m = feed(m,
+		tea.WindowSizeMsg{Width: 80, Height: 24},
+		runes("j"), runes("j"), // главное меню: индекс 0 -> 2 (Оболочка)
+		tea.KeyMsg{Type: tea.KeyEnter}, // переключить -> bash
+	)
+	if m.shellName() != "bash" || m.cfg.Shell != "bash" {
+		t.Fatalf("после переключения ожидался bash, получено %q", m.cfg.Shell)
+	}
+	m = feed(m, tea.KeyMsg{Type: tea.KeyEnter}) // обратно -> zsh
+	if m.shellName() != "zsh" {
+		t.Fatalf("повторное переключение должно вернуть zsh, получено %s", m.shellName())
+	}
+}
+
 // TestVariablesPanel — панель подсказки перечисляет определённые переменные
 // в форме ${NAME} и пуста, когда переменных нет.
 func TestVariablesPanel(t *testing.T) {
