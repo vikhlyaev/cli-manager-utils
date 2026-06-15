@@ -8,14 +8,23 @@ type Flag struct {
 }
 
 // Command описывает команду внутри префикса.
+//
+// Команда может быть листом (есть Run, опционально Flags) либо ветвью-диспетчером
+// (есть Subcommands произвольной вложенности). Если заданы Subcommands, при
+// генерации они имеют приоритет над Flags, а Run используется как действие по
+// умолчанию, когда подкоманда не распознана.
 type Command struct {
-	Name        string `yaml:"name"`
-	Description string `yaml:"description,omitempty"`
-	Run         string `yaml:"run"`
-	AcceptsArgs bool   `yaml:"accepts_args,omitempty"`
-	Condition   string `yaml:"condition,omitempty"`
-	Flags       []Flag `yaml:"flags,omitempty"`
+	Name        string    `yaml:"name"`
+	Description string    `yaml:"description,omitempty"`
+	Run         string    `yaml:"run,omitempty"`
+	AcceptsArgs bool      `yaml:"accepts_args,omitempty"`
+	Condition   string    `yaml:"condition,omitempty"`
+	Flags       []Flag    `yaml:"flags,omitempty"`
+	Subcommands []Command `yaml:"subcommands,omitempty"`
 }
+
+// IsBranch сообщает, является ли команда ветвью-диспетчером (имеет подкоманды).
+func (c Command) IsBranch() bool { return len(c.Subcommands) > 0 }
 
 // Prefix описывает корневой префикс (составная команда верхнего уровня).
 type Prefix struct {
