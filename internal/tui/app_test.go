@@ -1,6 +1,8 @@
 package tui
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -171,6 +173,47 @@ func TestToggleShell(t *testing.T) {
 	m = feed(m, tea.KeyMsg{Type: tea.KeyEnter}) // обратно -> zsh
 	if m.shellName() != "zsh" {
 		t.Fatalf("повторное переключение должно вернуть zsh, получено %s", m.shellName())
+	}
+}
+
+// TestImportAliases — `i` в списке префиксов импортирует alias из ~/.zshrc в
+// префикс-контейнер «imported», пропуская невалидные имена.
+func TestImportAliases(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	rc := "alias gs='git status'\nalias ll=\"ls -la\"\nalias g+='bad name'\n"
+	if err := os.WriteFile(filepath.Join(home, ".zshrc"), []byte(rc), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	m := NewModel(&models.Config{Variables: map[string]string{}})
+	m = feed(m,
+		tea.WindowSizeMsg{Width: 80, Height: 24},
+		tea.KeyMsg{Type: tea.KeyEnter}, // -> Префиксы
+		runes("i"),                     // импорт
+	)
+
+	var imp *models.Prefix
+	for i := range m.cfg.Prefixes {
+		if m.cfg.Prefixes[i].Name == importedPrefix {
+			imp = &m.cfg.Prefixes[i]
+		}
+	}
+	if imp == nil {
+		t.Fatalf("ожидался префикс %q, получено %+v", importedPrefix, m.cfg.Prefixes)
+	}
+	if len(imp.Commands) != 2 { // gs, ll — валидны; g+ пропущен
+		t.Fatalf("ожидалось 2 импортированных команды, получено %d: %+v", len(imp.Commands), imp.Commands)
+	}
+	if imp.Commands[0].Name != "gs" || imp.Commands[0].Run != "git status" {
+		t.Errorf("первая команда: ожидалось gs/'git status', получено %q/%q",
+			imp.Commands[0].Name, imp.Commands[0].Run)
+	}
+
+	// Повторный импорт не должен дублировать уже добавленные команды.
+	m = feed(m, runes("i"))
+	if len(m.cfg.Prefixes[len(m.cfg.Prefixes)-1].Commands) != 2 {
+		t.Errorf("повторный импорт не должен дублировать команды")
 	}
 }
 

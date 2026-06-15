@@ -13,10 +13,15 @@ import (
 	"github.com/charmbracelet/lipgloss"
 
 	"cli-manager/internal/compiler"
+	"cli-manager/internal/importer"
 	"cli-manager/internal/models"
 	"cli-manager/internal/storage"
 	"cli-manager/internal/validation"
 )
+
+// importedPrefix — имя префикса-контейнера, в который складываются alias,
+// импортированные из ~/.zshrc.
+const importedPrefix = "imported"
 
 var (
 	docStyle    = lipgloss.NewStyle().Margin(1, 2)
@@ -479,6 +484,10 @@ func (m *model) updatePrefixList(key tea.KeyMsg) (tea.Cmd, bool) {
 	case "J", "shift+down":
 		m.movePrefix(1)
 		return nil, true
+	case "i":
+		m.importAliases()
+		m.prefixesList.Select(m.prefixesList.Index())
+		return nil, true
 	case "enter":
 		if _, ok := m.prefixesList.SelectedItem().(prefixItem); ok {
 			m.activePrefixIdx = m.prefixesList.Index()
@@ -717,6 +726,64 @@ func (m *model) moveFlag(delta int) {
 	m.flagsList.Select(j)
 }
 
+// importAliases читает alias из ~/.zshrc и добавляет их командами в префикс-
+// контейнер importedPrefix. Невалидные по имени команды и уже существующие
+// пропускаются; пустой контейнер не создаётся.
+func (m *model) importAliases() {
+	aliases, err := importer.LoadAliases()
+	if err != nil {
+		m.status = "Импорт: не удалось прочитать ~/.zshrc: " + err.Error()
+		m.statusErr = true
+		return
+	}
+
+	// Находим контейнер (если уже есть) и собираем имена существующих команд.
+	idx := -1
+	existing := map[string]bool{}
+	for i, p := range m.cfg.Prefixes {
+		if p.Name == importedPrefix {
+			idx = i
+			for _, c := range p.Commands {
+				existing[c.Name] = true
+			}
+			break
+		}
+	}
+
+	// Отбираем пригодные к импорту до любых мутаций.
+	var toAdd []models.Command
+	skipped := 0
+	for _, a := range aliases {
+		if validation.ValidateCommandName(a.Name) != nil || existing[a.Name] {
+			skipped++
+			continue
+		}
+		existing[a.Name] = true
+		toAdd = append(toAdd, models.Command{
+			Name: a.Name, Run: a.Value, Description: "импорт из ~/.zshrc",
+		})
+	}
+
+	if len(toAdd) == 0 {
+		m.status = fmt.Sprintf("Импорт: нечего добавлять (пропущено %d)", skipped)
+		m.statusErr = false
+		return
+	}
+
+	m.pushUndo()
+	if idx == -1 {
+		m.cfg.Prefixes = append(m.cfg.Prefixes, models.Prefix{
+			Name: importedPrefix, Description: "Импортированные алиасы из ~/.zshrc",
+		})
+		idx = len(m.cfg.Prefixes) - 1
+	}
+	m.cfg.Prefixes[idx].Commands = append(m.cfg.Prefixes[idx].Commands, toAdd...)
+	m.persist()
+	m.refreshPrefixList()
+	m.status = fmt.Sprintf("Импорт: добавлено %d, пропущено %d", len(toAdd), skipped)
+	m.statusErr = false
+}
+
 // --- Обработка форм ---
 
 func (m model) updateForm(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -865,7 +932,7 @@ func (m model) View() string {
 		return m.viewMainMenu()
 	case statePrefixList:
 		return m.listView(m.prefixesList.View(),
-			"[n] новый  [e] изменить  [d] удалить  [⇧↑/↓] порядок  [p] zsh  [u] отмена  [enter] открыть  [esc] меню")
+			"[n] новый  [e] изменить  [d] удалить  [⇧↑/↓] порядок  [p] zsh  [i] импорт  [u] отмена  [enter] открыть  [esc] меню")
 	case stateCommandList:
 		return m.listView(m.commandsList.View(),
 			"[n] новая  [e] изменить  [d] удалить  [⇧↑/↓] порядок  [p] zsh  [u] отмена  [enter] флаги  [esc] назад")
