@@ -60,48 +60,31 @@ func renderHelpFns(b *strings.Builder, fnBase, usage, title string, cmds []model
 	fmt.Fprintf(b, "    echo %s\n", shQuote("Использование: "+usage+" <команда> [аргументы]"))
 
 	if len(cmds) > 0 {
-		// Ширина колонок имён команд и флагов — по самому длинному имени.
-		cmdWidth, flagWidth := 0, 0
-		for _, c := range cmds {
-			if l := len([]rune(c.Name)); l > cmdWidth {
-				cmdWidth = l
-			}
-			if !c.IsBranch() {
-				for _, f := range c.Flags {
-					if l := len([]rune(f.Name)); l > flagWidth {
-						flagWidth = l
-					}
-				}
+		// Полностью разворачиваем дерево: показываем все подкоманды и флаги на
+		// любой глубине, ничего не пряча.
+		rows := collectHelpRows(cmds, 0, "")
+
+		// Колонку описаний выравниваем по самому длинному «отступ + имя» среди
+		// всех строк, чтобы описания на любой глубине стояли единым столбцом.
+		maxCol := 0
+		for _, r := range rows {
+			if l := len([]rune(r.indent)) + len([]rune(r.name)); l > maxCol {
+				maxCol = l
 			}
 		}
-		cmdFormat := fmt.Sprintf("  %%-%ds  %%s\\n", cmdWidth)
-		flagFormat := fmt.Sprintf("      %%-%ds  %%s\\n", flagWidth)
 
 		b.WriteString("    echo \"\"\n")
 		fmt.Fprintf(b, "    echo %s\n", shQuote("Команды:"))
-		for _, c := range cmds {
-			// Ветви помечаем многоточием, чтобы отличать их от листьев.
-			desc := c.Description
-			if c.IsBranch() {
-				if desc != "" {
-					desc += " "
-				}
-				desc += "(подкоманды…)"
-			}
-			cmdLine := fmt.Sprintf("    printf %s %s %s\n",
-				shQuote(cmdFormat), shQuote(c.Name), shQuote(desc))
-			var flagLines strings.Builder
-			if !c.IsBranch() {
-				for _, f := range c.Flags {
-					fmt.Fprintf(&flagLines, "    printf %s %s %s\n",
-						shQuote(flagFormat), shQuote(f.Name), shQuote(f.Description))
-				}
-			}
-			block := cmdLine + flagLines.String()
-			if c.Condition != "" {
-				fmt.Fprintf(b, "    if %s; then\n%s    fi\n", c.Condition, block)
+		for _, r := range rows {
+			// Ширина поля имени = целевая колонка минус собственный отступ строки.
+			nameWidth := maxCol - len([]rune(r.indent))
+			format := fmt.Sprintf("%s%%-%ds  %%s\\n", r.indent, nameWidth)
+			line := fmt.Sprintf("    printf %s %s %s\n",
+				shQuote(format), shQuote(r.name), shQuote(r.desc))
+			if r.cond != "" {
+				fmt.Fprintf(b, "    if %s; then\n%s    fi\n", r.cond, line)
 			} else {
-				b.WriteString(block)
+				b.WriteString(line)
 			}
 		}
 	}
@@ -113,6 +96,51 @@ func renderHelpFns(b *strings.Builder, fnBase, usage, title string, cmds []model
 		if c.IsBranch() {
 			renderHelpFns(b, fnBase+"_"+sanitizeIdent(c.Name), usage+" "+c.Name, "", c.Subcommands)
 		}
+	}
+}
+
+// helpRow — одна строка справки: ведущий отступ, имя элемента, описание и
+// (опционально) условие показа, унаследованное от родительских ветвей.
+type helpRow struct {
+	indent string
+	name   string
+	desc   string
+	cond   string
+}
+
+// collectHelpRows рекурсивно разворачивает дерево команд в плоский список строк
+// справки. level — глубина (0 для команд верхнего уровня), parentCond —
+// накопленное условие показа родителя. Для ветвей вглубь идут подкоманды, для
+// листьев — их флаги.
+func collectHelpRows(cmds []models.Command, level int, parentCond string) []helpRow {
+	var rows []helpRow
+	indent := strings.Repeat(" ", 2+4*level)
+	childIndent := strings.Repeat(" ", 2+4*(level+1))
+	for _, c := range cmds {
+		cond := combineConditions(parentCond, c.Condition)
+		rows = append(rows, helpRow{indent: indent, name: c.Name, desc: c.Description, cond: cond})
+		if c.IsBranch() {
+			rows = append(rows, collectHelpRows(c.Subcommands, level+1, cond)...)
+		} else {
+			for _, f := range c.Flags {
+				rows = append(rows, helpRow{indent: childIndent, name: f.Name, desc: f.Description, cond: cond})
+			}
+		}
+	}
+	return rows
+}
+
+// combineConditions объединяет условие родителя и собственное условие команды
+// через "&&"; пустые условия опускаются.
+func combineConditions(parent, own string) string {
+	parent, own = strings.TrimSpace(parent), strings.TrimSpace(own)
+	switch {
+	case parent == "":
+		return own
+	case own == "":
+		return parent
+	default:
+		return parent + " && " + own
 	}
 }
 
