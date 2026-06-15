@@ -23,6 +23,9 @@ import (
 // импортированные из ~/.zshrc.
 const importedPrefix = "imported"
 
+// version — версия приложения, отображается в заголовке главного экрана.
+const version = "1.0.0"
+
 var (
 	docStyle    = lipgloss.NewStyle().Margin(1, 2)
 	titleStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("205")).Bold(true).Padding(0, 1)
@@ -1092,7 +1095,7 @@ func (m model) viewPreview() string {
 
 func (m model) viewMainMenu() string {
 	var b strings.Builder
-	b.WriteString(headerStyle.Render("CLI Manager") + "\n")
+	b.WriteString(headerStyle.Render("CLI Manager") + " " + hintStyle.Render("v"+version) + "\n")
 	b.WriteString(hintStyle.Render("Конструктор составных команд для "+strings.ToUpper(m.shellName())) + "\n\n")
 	for i, item := range m.menuItems() {
 		cursor := "  "
