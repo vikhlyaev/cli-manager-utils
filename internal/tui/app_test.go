@@ -217,6 +217,32 @@ func TestImportAliases(t *testing.T) {
 	}
 }
 
+// TestEmptyListScreen — пустой список показывает русский заголовок-путь и
+// инструктивную подсказку, без английского «No items».
+func TestEmptyListScreen(t *testing.T) {
+	cfg := &models.Config{
+		Variables: map[string]string{},
+		Prefixes:  []models.Prefix{{Name: "av", Commands: []models.Command{{Name: "deploy"}}}},
+	}
+	m := NewModel(cfg)
+	m = feed(m,
+		tea.WindowSizeMsg{Width: 80, Height: 24},
+		tea.KeyMsg{Type: tea.KeyEnter}, // Префиксы
+		tea.KeyMsg{Type: tea.KeyEnter}, // Команды (deploy)
+		tea.KeyMsg{Type: tea.KeyEnter}, // deploy — лист, Enter -> флаги (пусто)
+	)
+	view := m.View()
+	if !strings.Contains(view, "av deploy") {
+		t.Errorf("ожидался заголовок-путь 'av deploy':\n%s", view)
+	}
+	if !strings.Contains(view, "Флагов нет") {
+		t.Errorf("ожидался русский текст пустого состояния:\n%s", view)
+	}
+	if strings.Contains(view, "No items") {
+		t.Errorf("английское 'No items' не должно отображаться:\n%s", view)
+	}
+}
+
 // TestFormHeaderContext — заголовок формы отражает режим, тип и путь в дереве.
 func TestFormHeaderContext(t *testing.T) {
 	cfg := &models.Config{

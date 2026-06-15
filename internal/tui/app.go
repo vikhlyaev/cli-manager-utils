@@ -125,6 +125,13 @@ func newList(title string) list.Model {
 	l := list.New([]list.Item{}, list.NewDefaultDelegate(), 0, 0)
 	l.Title = title
 	l.Styles.Title = titleStyle
+	// Заголовок, статус-бар, встроенную справку и пустое состояние bubbles
+	// отключаем — рисуем свою шапку, подсказки и текст пустого экрана (по-русски)
+	// в listScreen.
+	l.SetShowTitle(false)
+	l.SetShowStatusBar(false)
+	l.SetShowHelp(false)
+	l.SetFilteringEnabled(false)
 	return l
 }
 
@@ -356,10 +363,16 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.width, m.height = size.Width, size.Height
 		h, v := docStyle.GetFrameSize()
 		w, ht := size.Width-h, size.Height-v
-		m.prefixesList.SetSize(w, ht)
-		m.commandsList.SetSize(w, ht)
-		m.flagsList.SetSize(w, ht)
-		m.variablesList.SetSize(w, ht)
+		// Резервируем строки под свою шапку (заголовок + подзаголовок + отступ)
+		// и строку подсказок снизу.
+		listH := ht - 5
+		if listH < 1 {
+			listH = 1
+		}
+		m.prefixesList.SetSize(w, listH)
+		m.commandsList.SetSize(w, listH)
+		m.flagsList.SetSize(w, listH)
+		m.variablesList.SetSize(w, listH)
 
 		// Резервируем строки под заголовок (имя + путь), отступы и подсказки.
 		vpH := ht - 5
@@ -1040,16 +1053,24 @@ func (m model) View() string {
 	case stateMainMenu:
 		return m.viewMainMenu()
 	case statePrefixList:
-		return m.listView(m.prefixesList.View(),
+		return m.listScreen(m.prefixesList,
+			"CLI Manager · Префиксы", "наборы команд верхнего уровня",
+			"Пока пусто. Нажмите [n], чтобы создать первый префикс.",
 			"[n] новый  [e] изменить  [d] удалить  [⇧↑/↓] порядок  [p] zsh  [i] импорт  [u] отмена  [enter] открыть  [esc] меню")
 	case stateCommandList:
-		return m.listView(m.commandsList.View(),
+		return m.listScreen(m.commandsList,
+			m.breadcrumb(m.cmdPath)+" · команды", "Enter: лист → флаги, ветвь → вглубь",
+			"Команд нет. Нажмите [n], чтобы добавить команду.",
 			"[enter] лист→флаги/ветвь→вглубь  [s] подкоманды  [f] флаги  [n] новая  [e] изм  [d] удал  [⇧↑/↓] порядок  [p] zsh  [u] отмена  [esc] назад")
 	case stateFlagList:
-		return m.listView(m.flagsList.View(),
+		return m.listScreen(m.flagsList,
+			m.breadcrumb(m.flagCmdPath)+" · флаги", "опции команды-листа",
+			"Флагов нет. Нажмите [n], чтобы добавить флаг.",
 			"[n] новый  [e] изменить  [d] удалить  [⇧↑/↓] порядок  [u] отмена  [esc] назад")
 	case stateVariableList:
-		return m.listView(m.variablesList.View(),
+		return m.listScreen(m.variablesList,
+			"CLI Manager · Глобальные переменные", "ключ → значение, экспортируются в скрипт",
+			"Переменных нет. Нажмите [n], чтобы добавить переменную.",
 			"[n] новая  [e] изменить  [d] удалить  [u] отмена  [esc] меню")
 	case statePreview:
 		return m.viewPreview()
@@ -1089,18 +1110,35 @@ func (m model) viewMainMenu() string {
 	return docStyle.Render(b.String())
 }
 
-func (m model) listView(body, hints string) string {
-	out := body + "\n\n  "
-	if m.confirmDelete {
-		out += warnStyle.Render(fmt.Sprintf("Удалить %s? ", m.deleteLabel)) +
-			hintStyle.Render("[y] да  [n] нет")
+// listScreen рисует экран-список с собственной шапкой (заголовок + подзаголовок —
+// «где ты»), телом (список или русский текст пустого состояния — «что делать»)
+// и строкой подсказок.
+func (m model) listScreen(l list.Model, title, subtitle, emptyHint, hints string) string {
+	var b strings.Builder
+
+	b.WriteString(headerStyle.Render(title))
+	if subtitle != "" {
+		b.WriteString("  " + hintStyle.Render("· "+subtitle))
+	}
+	b.WriteString("\n\n")
+
+	if len(l.Items()) == 0 {
+		b.WriteString(hintStyle.Render(emptyHint))
 	} else {
-		out += hintStyle.Render(hints)
+		b.WriteString(l.View())
+	}
+
+	b.WriteString("\n\n")
+	if m.confirmDelete {
+		b.WriteString(warnStyle.Render(fmt.Sprintf("Удалить %s? ", m.deleteLabel)) +
+			hintStyle.Render("[y] да  [n] нет"))
+	} else {
+		b.WriteString(hintStyle.Render(hints))
 	}
 	if m.status != "" {
-		out += "\n  " + m.statusLine()
+		b.WriteString("\n" + m.statusLine())
 	}
-	return docStyle.Render(out)
+	return docStyle.Render(b.String())
 }
 
 // variablesPanel возвращает подсказку со списком определённых глобальных
