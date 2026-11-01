@@ -19,9 +19,6 @@ import (
 // импортированные из ~/.zshrc.
 const importedPrefix = "imported"
 
-// version — версия приложения, отображается в заголовке главного экрана.
-const version = "1.0.0"
-
 // undoLimit — максимальная глубина undo-стека.
 const undoLimit = 50
 

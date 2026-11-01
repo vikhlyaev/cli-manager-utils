@@ -6,6 +6,7 @@ import (
 
 	"github.com/charmbracelet/bubbles/list"
 
+	"cli-manager/internal/buildinfo"
 	"cli-manager/internal/compiler"
 )
 
@@ -44,7 +45,7 @@ func (m model) View() string {
 
 func (m model) viewMainMenu() string {
 	var b strings.Builder
-	b.WriteString(headerStyle.Render("CLI Manager") + " " + hintStyle.Render("v"+version) + "\n")
+	b.WriteString(headerStyle.Render("CLI Manager") + " " + hintStyle.Render(buildinfo.Version) + "\n")
 	b.WriteString(hintStyle.Render("Конструктор составных команд для "+strings.ToUpper(m.shellName())) + "\n\n")
 	for i, item := range m.menuItems() {
 		cursor, line := "  ", item
