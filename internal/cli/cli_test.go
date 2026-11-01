@@ -118,3 +118,34 @@ func TestInit(t *testing.T) {
 		t.Errorf("--print: code=%d out=%q", code, block)
 	}
 }
+
+func TestDoctor(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	if err := storage.SaveConfig(&models.Config{Prefixes: []models.Prefix{{
+		Name: "zz_cli_manager_test", Commands: []models.Command{{Name: "hi", Run: "echo hi"}},
+	}}}); err != nil {
+		t.Fatal(err)
+	}
+
+	// Чистый HOME: скрипта нет и он не подключён.
+	code, out, _ := run(t, "doctor")
+	if code != 1 || !strings.Contains(out, "cli-manager generate") || !strings.Contains(out, "cli-manager init") {
+		t.Fatalf("ожидались ошибки: code=%d\n%s", code, out)
+	}
+
+	rc := filepath.Join(home, ".zshrc")
+	if err := os.WriteFile(rc, []byte("autoload -Uz compinit && compinit\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if code, _, errOut := run(t, "init", "--yes"); code != 0 {
+		t.Fatalf("init: %s", errOut)
+	}
+	code, out, _ = run(t, "doctor")
+	if code != 0 || strings.Contains(out, "✗") {
+		t.Fatalf("после init всё должно быть исправно: code=%d\n%s", code, out)
+	}
+	if !strings.Contains(out, "compinit найден") {
+		t.Errorf("нет проверки compinit:\n%s", out)
+	}
+}
