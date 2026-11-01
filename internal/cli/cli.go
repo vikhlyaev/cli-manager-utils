@@ -31,6 +31,7 @@ type command struct {
 func commands() []command {
 	return []command{
 		{name: "generate", summary: "перегенерировать скрипт из конфига", run: runGenerate},
+		{name: "init", summary: "подключить скрипт к ~/.zshrc или ~/.bashrc (--yes, --print)", run: runInit},
 		{name: "path", summary: "напечатать путь к сгенерированному скрипту", run: runPath},
 		{name: "version", aliases: []string{"--version", "-v"}, summary: "показать версию", run: runVersion},
 		{name: "help", aliases: []string{"--help", "-h"}, summary: "эта справка", run: runHelp},

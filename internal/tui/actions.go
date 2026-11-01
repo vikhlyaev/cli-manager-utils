@@ -142,6 +142,7 @@ func (m *model) toggleShell() {
 		m.cfg.Shell = "zsh"
 	}
 	m.persist()
+	m.checkSourced()
 }
 
 // performDelete удаляет выбранный элемент после подтверждения. Пока ждём

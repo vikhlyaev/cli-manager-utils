@@ -11,7 +11,10 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/huh"
 
+	"cli-manager/internal/compiler"
+	"cli-manager/internal/importer"
 	"cli-manager/internal/models"
+	"cli-manager/internal/shellrc"
 	"cli-manager/internal/validation"
 )
 
@@ -109,6 +112,9 @@ type model struct {
 	previewTitle  string       // заголовок над окном предпросмотра
 	previousState sessionState // куда вернуться по Esc из предпросмотра
 
+	// notSourced — скрипт не подключён в rc-файле оболочки (подсказка в меню).
+	notSourced bool
+
 	// Снимки конфигурации до каждой мутации (последний — самый свежий).
 	undoStack []*models.Config
 }
@@ -168,11 +174,19 @@ func sortedKeys(mp map[string]string) []string {
 	return keys
 }
 
+// checkSourced проверяет, подключён ли сгенерированный скрипт в rc-файле
+// текущей оболочки. Ошибку чтения не показываем — это лишь подсказка.
+func (m *model) checkSourced() {
+	ok, err := shellrc.IsInstalled(importer.RCPath(m.shellName()), compiler.For(m.cfg.Shell).OutputPath())
+	m.notSourced = err == nil && !ok
+}
+
 func inRange(i, n int) bool { return i >= 0 && i < n }
 
 // Run запускает TUI-приложение.
 func Run(cfg *models.Config) {
 	m := NewModel(cfg)
+	m.checkSourced()
 	if ps := validation.ValidateConfig(cfg); len(ps) > 0 {
 		m.setError(fmt.Sprintf("⚠ В конфиге проблем: %d (первая — %s). Подробнее: cli-manager doctor", len(ps), ps[0]))
 	}

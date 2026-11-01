@@ -77,3 +77,44 @@ func TestGenerate(t *testing.T) {
 		t.Errorf("скрипт не записан: %v", err)
 	}
 }
+
+func TestInit(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	rc := filepath.Join(home, ".zshrc")
+
+	// Отказ на вопрос — файл не трогаем.
+	var out, errb bytes.Buffer
+	code := Run([]string{"init"}, IO{In: strings.NewReader("n\n"), Out: &out, Err: &errb})
+	if code != 1 {
+		t.Fatalf("отказ: code=%d", code)
+	}
+	if _, err := os.Stat(rc); !os.IsNotExist(err) {
+		t.Fatal("после отказа rc не должен создаваться")
+	}
+
+	// Согласие — блок добавлен и скрипт сгенерирован.
+	out.Reset()
+	code = Run([]string{"init"}, IO{In: strings.NewReader("y\n"), Out: &out, Err: &errb})
+	if code != 0 {
+		t.Fatalf("согласие: code=%d err=%s", code, errb.String())
+	}
+	data, _ := os.ReadFile(rc)
+	if !strings.Contains(string(data), "generated.zsh") {
+		t.Errorf("rc без подключения:\n%s", data)
+	}
+	if _, err := os.Stat(filepath.Join(home, ".local/share/cli-manager/generated.zsh")); err != nil {
+		t.Errorf("скрипт не создан: %v", err)
+	}
+
+	// Повторный запуск — ничего не меняет.
+	code, out2, _ := run(t, "init", "--yes")
+	if code != 0 || !strings.Contains(out2, "уже подключён") {
+		t.Errorf("повтор: code=%d out=%q", code, out2)
+	}
+
+	code, block, _ := run(t, "init", "--print")
+	if code != 0 || !strings.Contains(block, "# >>> cli-manager >>>") {
+		t.Errorf("--print: code=%d out=%q", code, block)
+	}
+}

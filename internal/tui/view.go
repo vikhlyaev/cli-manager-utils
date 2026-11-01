@@ -8,6 +8,7 @@ import (
 
 	"cli-manager/internal/buildinfo"
 	"cli-manager/internal/compiler"
+	"cli-manager/internal/importer"
 )
 
 func (m model) View() string {
@@ -55,6 +56,10 @@ func (m model) viewMainMenu() string {
 		b.WriteString(cursor + line + "\n")
 	}
 	b.WriteString("\n" + hintStyle.Render("[↑/↓] выбор  [enter] открыть  [q] выход"))
+	if m.notSourced {
+		b.WriteString("\n\n" + warnStyle.Render("⚠ Скрипт не подключён к "+importer.RCPath(m.shellName())+
+			" — выполните: cli-manager init"))
+	}
 	if m.status != "" {
 		b.WriteString("\n\n" + m.statusLine())
 	}
