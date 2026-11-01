@@ -26,7 +26,8 @@ func (ZshCompiler) OutputPath() string {
 // Generate собирает скрипт, проверяет его синтаксис и атомарно записывает на
 // диск. При синтаксической ошибке прежний скрипт не меняется.
 func (z ZshCompiler) Generate(cfg *models.Config) error {
-	return writeScript(z.OutputPath(), "zsh", z.render(cfg))
+	script, gen := stampScript(z.renderRaw(cfg))
+	return writeScript(z.OutputPath(), "zsh", script, gen)
 }
 
 // Render возвращает полный текст скрипта без записи на диск (для предпросмотра).
@@ -42,8 +43,14 @@ func (z ZshCompiler) RenderPrefix(p models.Prefix) string {
 	return b.String()
 }
 
-// render формирует текст скрипта в памяти (вынесено отдельно для тестируемости).
+// render возвращает итоговый текст скрипта (с идентификатором поколения).
 func (z ZshCompiler) render(cfg *models.Config) string {
+	script, _ := stampScript(z.renderRaw(cfg))
+	return script
+}
+
+// renderRaw формирует текст скрипта в памяти (вынесено отдельно для тестируемости).
+func (z ZshCompiler) renderRaw(cfg *models.Config) string {
 	var b strings.Builder
 
 	b.WriteString("#!/usr/bin/env zsh\n")
@@ -56,6 +63,8 @@ func (z ZshCompiler) render(cfg *models.Config) string {
 	for _, p := range cfg.Prefixes {
 		z.renderPrefix(&b, p)
 	}
+
+	renderReloadHook(&b, z.OutputPath(), cfg.Prefixes, zshReloadRegister)
 
 	return b.String()
 }
@@ -124,3 +133,10 @@ func (zshEmitter) emitLeaf(b *strings.Builder, path string, c models.Command) {
 	}
 	b.WriteString("            ;;\n")
 }
+
+// zshReloadRegister регистрирует хук авто-перезагрузки (только в интерактивной
+// оболочке; повторная регистрация не дублирует хук).
+const zshReloadRegister = `if [[ -o interactive ]] && autoload -Uz add-zsh-hook 2>/dev/null; then
+    add-zsh-hook precmd __cli_manager_reload
+fi
+`

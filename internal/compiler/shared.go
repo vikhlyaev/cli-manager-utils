@@ -1,6 +1,8 @@
 package compiler
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"sort"
 	"strings"
@@ -331,4 +333,49 @@ func shQuote(s string) string {
 // shCasePattern экранирует имя/путь для использования в качестве паттерна case.
 func shCasePattern(name string) string {
 	return "'" + strings.ReplaceAll(name, "'", `'\''`) + "'"
+}
+
+// --- Авто-перезагрузка ---------------------------------------------------------
+
+// genPlaceholder заменяется на идентификатор поколения скрипта (хеш его текста).
+const genPlaceholder = "__CLI_MANAGER_GEN_PLACEHOLDER__"
+
+// StampPath — файл рядом со скриптом, где лежит идентификатор последнего
+// записанного поколения. Хук в открытых терминалах сравнивает его со своим.
+func StampPath(scriptPath string) string { return scriptPath + ".stamp" }
+
+// renderReloadHook печатает функцию __cli_manager_reload: перед каждым
+// приглашением она читает stamp-файл и, если скрипт перегенерирован, снимает
+// функции прежних префиксов (чтобы удалённые исчезли) и заново подключает
+// скрипт. register — код регистрации хука для конкретной оболочки.
+func renderReloadHook(b *strings.Builder, scriptPath string, prefixes []models.Prefix, register string) {
+	names := make([]string, len(prefixes))
+	for i, p := range prefixes {
+		names[i] = p.Name
+	}
+	b.WriteString("# --- Авто-перезагрузка в открытых терминалах ---\n")
+	fmt.Fprintf(b, "__CLI_MANAGER_SCRIPT=%s\n", shQuote(scriptPath))
+	fmt.Fprintf(b, "__CLI_MANAGER_GEN=%s\n", shQuote(genPlaceholder))
+	fmt.Fprintf(b, "__CLI_MANAGER_PREFIXES=(%s)\n", strings.Join(names, " "))
+	b.WriteString(`__cli_manager_reload() {
+    local __stamp="$__CLI_MANAGER_SCRIPT.stamp" __gen __p
+    [[ -r "$__stamp" && -r "$__CLI_MANAGER_SCRIPT" ]] || return 0
+    read -r __gen < "$__stamp"
+    [[ -z "$__gen" || "$__gen" == "$__CLI_MANAGER_GEN" ]] && return 0
+    for __p in "${__CLI_MANAGER_PREFIXES[@]}"; do
+        unset -f "$__p" "_${__p}_completions" 2>/dev/null
+    done
+    source "$__CLI_MANAGER_SCRIPT"
+}
+`)
+	b.WriteString(register)
+}
+
+// stampScript подставляет в скрипт идентификатор поколения — короткий хеш
+// текста. Он детерминирован: одинаковый конфиг даёт одинаковый скрипт, и
+// открытые терминалы не перезагружают его зря.
+func stampScript(script string) (string, string) {
+	sum := sha256.Sum256([]byte(script))
+	gen := hex.EncodeToString(sum[:8])
+	return strings.Replace(script, genPlaceholder, gen, 1), gen
 }

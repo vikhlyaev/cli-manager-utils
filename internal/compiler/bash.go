@@ -26,7 +26,8 @@ func (BashCompiler) OutputPath() string {
 // Generate собирает скрипт, проверяет его синтаксис и атомарно записывает на
 // диск. При синтаксической ошибке прежний скрипт не меняется.
 func (b BashCompiler) Generate(cfg *models.Config) error {
-	return writeScript(b.OutputPath(), "bash", b.render(cfg))
+	script, gen := stampScript(b.renderRaw(cfg))
+	return writeScript(b.OutputPath(), "bash", script, gen)
 }
 
 // Render возвращает полный текст скрипта без записи на диск (для предпросмотра).
@@ -41,8 +42,14 @@ func (b BashCompiler) RenderPrefix(p models.Prefix) string {
 	return sb.String()
 }
 
-// render формирует текст скрипта в памяти.
+// render возвращает итоговый текст скрипта (с идентификатором поколения).
 func (bc BashCompiler) render(cfg *models.Config) string {
+	script, _ := stampScript(bc.renderRaw(cfg))
+	return script
+}
+
+// renderRaw формирует текст скрипта в памяти.
+func (bc BashCompiler) renderRaw(cfg *models.Config) string {
 	var b strings.Builder
 
 	b.WriteString("#!/usr/bin/env bash\n")
@@ -55,6 +62,8 @@ func (bc BashCompiler) render(cfg *models.Config) string {
 	for _, p := range cfg.Prefixes {
 		bc.renderPrefix(&b, p)
 	}
+
+	renderReloadHook(&b, bc.OutputPath(), cfg.Prefixes, bashReloadRegister)
 
 	return b.String()
 }
@@ -121,3 +130,10 @@ func (bashEmitter) emitLeaf(b *strings.Builder, path string, c models.Command) {
 	}
 	b.WriteString("            ;;\n")
 }
+
+// bashReloadRegister регистрирует хук авто-перезагрузки (только в интерактивной
+// оболочке; повторная регистрация не дублирует хук).
+const bashReloadRegister = `if [[ $- == *i* && ";${PROMPT_COMMAND[*]};" != *__cli_manager_reload* ]]; then
+    PROMPT_COMMAND="__cli_manager_reload${PROMPT_COMMAND:+;$PROMPT_COMMAND}"
+fi
+`
