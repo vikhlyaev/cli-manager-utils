@@ -335,6 +335,45 @@ func shCasePattern(name string) string {
 	return "'" + strings.ReplaceAll(name, "'", `'\''`) + "'"
 }
 
+// --- Выключенные элементы ---------------------------------------------------
+
+// enabledOnly возвращает копию конфигурации без выключенных префиксов, команд и
+// флагов. Генерация работает только с ней, поэтому остальной код о Disabled не
+// знает.
+func enabledOnly(cfg *models.Config) *models.Config {
+	out := *cfg
+	out.Prefixes = nil
+	for _, p := range cfg.Prefixes {
+		if !p.Disabled {
+			p.Commands = enabledCommands(p.Commands)
+			out.Prefixes = append(out.Prefixes, p)
+		}
+	}
+	return &out
+}
+
+func enabledCommands(cmds []models.Command) []models.Command {
+	var out []models.Command
+	for _, c := range cmds {
+		if c.Disabled {
+			continue
+		}
+		var flags []models.Flag
+		for _, f := range c.Flags {
+			if !f.Disabled {
+				flags = append(flags, f)
+			}
+		}
+		c.Flags = flags
+		c.Subcommands = enabledCommands(c.Subcommands)
+		out = append(out, c)
+	}
+	return out
+}
+
+// disabledPrefixNote — текст предпросмотра выключенного префикса.
+const disabledPrefixNote = "# Префикс выключен — в скрипт не попадает.\n"
+
 // --- Авто-перезагрузка ---------------------------------------------------------
 
 // genPlaceholder заменяется на идентификатор поколения скрипта (хеш его текста).

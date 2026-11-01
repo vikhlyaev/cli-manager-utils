@@ -38,6 +38,10 @@ func (z ZshCompiler) Render(cfg *models.Config) string {
 // RenderPrefix возвращает сгенерированный фрагмент скрипта для одного префикса
 // (функция-диспетчер, справка и автодополнение) — для предпросмотра в TUI.
 func (z ZshCompiler) RenderPrefix(p models.Prefix) string {
+	if p.Disabled {
+		return disabledPrefixNote
+	}
+	p.Commands = enabledCommands(p.Commands)
 	var b strings.Builder
 	z.renderPrefix(&b, p)
 	return b.String()
@@ -51,6 +55,7 @@ func (z ZshCompiler) render(cfg *models.Config) string {
 
 // renderRaw формирует текст скрипта в памяти (вынесено отдельно для тестируемости).
 func (z ZshCompiler) renderRaw(cfg *models.Config) string {
+	cfg = enabledOnly(cfg)
 	var b strings.Builder
 
 	b.WriteString("#!/usr/bin/env zsh\n")

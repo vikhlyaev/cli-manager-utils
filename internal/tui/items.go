@@ -9,11 +9,22 @@ import (
 // prefixItem — элемент списка префиксов.
 type prefixItem struct{ prefix models.Prefix }
 
-func (i prefixItem) Title() string {
-	if i.prefix.Description != "" {
-		return fmt.Sprintf("%s — %s", i.prefix.Name, i.prefix.Description)
+// disabledMark — пометка выключенного элемента в начале заголовка.
+const disabledMark = "⏸ "
+
+func mark(disabled bool, title string) string {
+	if disabled {
+		return disabledMark + title + " · выключен"
 	}
-	return i.prefix.Name
+	return title
+}
+
+func (i prefixItem) Title() string {
+	t := i.prefix.Name
+	if i.prefix.Description != "" {
+		t = fmt.Sprintf("%s — %s", i.prefix.Name, i.prefix.Description)
+	}
+	return mark(i.prefix.Disabled, t)
 }
 func (i prefixItem) Description() string {
 	return fmt.Sprintf("команд: %d", len(i.prefix.Commands))
@@ -24,10 +35,11 @@ func (i prefixItem) FilterValue() string { return i.prefix.Name }
 type commandItem struct{ cmd models.Command }
 
 func (i commandItem) Title() string {
+	t := i.cmd.Name
 	if i.cmd.IsBranch() {
-		return i.cmd.Name + " ▸" // маркер ветви с подкомандами
+		t += " ▸" // маркер ветви с подкомандами
 	}
-	return i.cmd.Name
+	return mark(i.cmd.Disabled, t)
 }
 func (i commandItem) Description() string {
 	desc := i.cmd.Description
@@ -56,7 +68,7 @@ func (i commandItem) FilterValue() string { return i.cmd.Name }
 // flagItem — элемент списка флагов.
 type flagItem struct{ flag models.Flag }
 
-func (i flagItem) Title() string { return i.flag.Name }
+func (i flagItem) Title() string { return mark(i.flag.Disabled, i.flag.Name) }
 func (i flagItem) Description() string {
 	if i.flag.Description != "" {
 		return i.flag.Description

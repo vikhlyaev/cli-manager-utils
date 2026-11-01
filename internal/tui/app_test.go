@@ -841,3 +841,39 @@ func TestDuplicatePrefixUsesUnderscore(t *testing.T) {
 		t.Fatalf("ожидался префикс av_copy: %+v", m.cfg.Prefixes)
 	}
 }
+
+// TestToggleDisabled — `x` выключает команду (она пропадает из скрипта),
+// повторное `x` включает; правка через форму не сбрасывает признак.
+func TestToggleDisabled(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	cfg := &models.Config{Variables: map[string]string{}, Prefixes: []models.Prefix{{
+		Name: "av", Commands: []models.Command{{Name: "note", Run: "echo NOTE_RUN"}},
+	}}}
+	m := NewModel(cfg)
+	m = feed(m, tea.WindowSizeMsg{Width: 80, Height: 24},
+		tea.KeyMsg{Type: tea.KeyEnter}, tea.KeyMsg{Type: tea.KeyEnter}, runes("x"))
+	if !m.cfg.Prefixes[0].Commands[0].Disabled {
+		t.Fatal("после x команда должна быть выключена")
+	}
+	script, err := os.ReadFile(filepath.Join(home, ".local/share/cli-manager/generated.zsh"))
+	if err != nil || strings.Contains(string(script), "NOTE_RUN") {
+		t.Fatalf("выключенная команда не должна попадать в скрипт (err=%v)", err)
+	}
+	if !strings.Contains(m.View(), "⏸ note") {
+		t.Errorf("в списке должна быть пометка выключения:\n%s", m.View())
+	}
+
+	// Правка формой сохраняет признак.
+	m = feed(m, runes("e"))
+	m.fb.description = "новое описание"
+	m.commitForm()
+	if c := m.cfg.Prefixes[0].Commands[0]; !c.Disabled || c.Description != "новое описание" {
+		t.Fatalf("правка должна сохранить Disabled: %+v", c)
+	}
+
+	m = feed(m, runes("x"))
+	if m.cfg.Prefixes[0].Commands[0].Disabled {
+		t.Fatal("повторное x должно включить команду")
+	}
+}

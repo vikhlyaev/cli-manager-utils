@@ -37,6 +37,10 @@ func (b BashCompiler) Render(cfg *models.Config) string {
 
 // RenderPrefix возвращает сгенерированный фрагмент скрипта для одного префикса.
 func (b BashCompiler) RenderPrefix(p models.Prefix) string {
+	if p.Disabled {
+		return disabledPrefixNote
+	}
+	p.Commands = enabledCommands(p.Commands)
 	var sb strings.Builder
 	b.renderPrefix(&sb, p)
 	return sb.String()
@@ -50,6 +54,7 @@ func (bc BashCompiler) render(cfg *models.Config) string {
 
 // renderRaw формирует текст скрипта в памяти.
 func (bc BashCompiler) renderRaw(cfg *models.Config) string {
+	cfg = enabledOnly(cfg)
 	var b strings.Builder
 
 	b.WriteString("#!/usr/bin/env bash\n")

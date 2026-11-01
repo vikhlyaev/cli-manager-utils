@@ -5,6 +5,8 @@ type Flag struct {
 	Name        string `yaml:"name"`
 	Description string `yaml:"description,omitempty"`
 	Run         string `yaml:"run"`
+	// Disabled — флаг выключен: остаётся в конфиге, но не попадает в скрипт.
+	Disabled bool `yaml:"disabled,omitempty"`
 }
 
 // Command описывает команду внутри префикса.
@@ -21,6 +23,8 @@ type Command struct {
 	Condition   string    `yaml:"condition,omitempty"`
 	Flags       []Flag    `yaml:"flags,omitempty"`
 	Subcommands []Command `yaml:"subcommands,omitempty"`
+	// Disabled — команда (со всеми вложенными) выключена и не генерируется.
+	Disabled bool `yaml:"disabled,omitempty"`
 }
 
 // IsBranch сообщает, является ли команда ветвью-диспетчером (имеет подкоманды).
@@ -31,6 +35,8 @@ type Prefix struct {
 	Name        string    `yaml:"name"`
 	Description string    `yaml:"description,omitempty"`
 	Commands    []Command `yaml:"commands,omitempty"`
+	// Disabled — префикс выключен: функция не генерируется.
+	Disabled bool `yaml:"disabled,omitempty"`
 }
 
 // Config — корневая структура конфигурации cli-manager.

@@ -184,7 +184,8 @@ func (m *model) applyForm() bool {
 			return false
 		}
 		old := (*children)[m.editIdx]
-		c.Flags, c.Subcommands = old.Flags, old.Subcommands
+		// Вложенное и признак выключения формой не редактируются — сохраняем.
+		c.Flags, c.Subcommands, c.Disabled = old.Flags, old.Subcommands, old.Disabled
 		(*children)[m.editIdx] = c
 
 	case stateFlagForm:
@@ -199,7 +200,9 @@ func (m *model) applyForm() bool {
 		if !inRange(m.editIdx, len(cmd.Flags)) {
 			return false
 		}
-		cmd.Flags[m.editIdx] = m.fb.flag()
+		f := m.fb.flag()
+		f.Disabled = cmd.Flags[m.editIdx].Disabled
+		cmd.Flags[m.editIdx] = f
 
 	case stateVariableForm:
 		if editing && m.editKey != "" && m.editKey != m.fb.name {

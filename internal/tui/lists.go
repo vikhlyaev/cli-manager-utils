@@ -147,6 +147,9 @@ func (m *model) updateListKey(key tea.KeyMsg) (tea.Cmd, bool) {
 	case "?":
 		m.openHelp()
 		return nil, true
+	case "x":
+		m.toggleDisabled()
+		return nil, m.state != stateVariableList
 	case "c":
 		m.duplicate() // переменные не дублируются: ключ всё равно придётся менять
 		return nil, m.state != stateVariableList

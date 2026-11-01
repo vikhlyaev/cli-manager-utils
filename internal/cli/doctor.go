@@ -129,6 +129,9 @@ func checkCollisions(r *report, prefixes []models.Prefix, rc string) {
 	}
 	clean := true
 	for _, p := range prefixes {
+		if p.Disabled {
+			continue // выключенный префикс ничего не перекрывает
+		}
 		if aliases[p.Name] {
 			clean = false
 			r.warn("префикс %s совпадает с alias из %s", p.Name, rc)

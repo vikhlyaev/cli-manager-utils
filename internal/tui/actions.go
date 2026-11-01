@@ -346,3 +346,47 @@ func deepCopy[T any](v T) T {
 	}
 	return c
 }
+
+// --- Выключение ---
+
+// toggleDisabled включает/выключает выбранный префикс, команду или флаг.
+// Выключенный элемент остаётся в конфиге, но не попадает в скрипт.
+func (m *model) toggleDisabled() {
+	var (
+		flag *bool
+		l    *list.Model
+		name string
+	)
+	switch m.state {
+	case statePrefixList:
+		if i := m.prefixesList.GlobalIndex(); inRange(i, len(m.cfg.Prefixes)) {
+			flag, l, name = &m.cfg.Prefixes[i].Disabled, &m.prefixesList, m.cfg.Prefixes[i].Name
+		}
+	case stateCommandList:
+		children := *m.childrenPtr()
+		if i := m.commandsList.GlobalIndex(); inRange(i, len(children)) {
+			flag, l, name = &children[i].Disabled, &m.commandsList, children[i].Name
+		}
+	case stateFlagList:
+		if cmd := m.commandAt(m.flagCmdPath); cmd != nil {
+			if i := m.flagsList.GlobalIndex(); inRange(i, len(cmd.Flags)) {
+				flag, l, name = &cmd.Flags[i].Disabled, &m.flagsList, cmd.Flags[i].Name
+			}
+		}
+	}
+	if flag == nil {
+		return
+	}
+	idx := l.GlobalIndex()
+	m.mutate(func() { *flag = !*flag })
+	m.refreshList(m.state)
+	l.Select(idx)
+	if m.statusErr {
+		return
+	}
+	if *flag {
+		m.setStatus(fmt.Sprintf("'%s' выключен — в скрипт не попадает", name))
+	} else {
+		m.setStatus(fmt.Sprintf("'%s' включён", name))
+	}
+}
