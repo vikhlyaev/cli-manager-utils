@@ -132,9 +132,8 @@ func (m model) viewForm() string {
 	b.WriteString(m.formHeader() + "\n\n")
 	b.WriteString(m.form.View())
 
-	if m.state == stateCommandForm && m.collision {
-		b.WriteString("\n" + warnStyle.Render(
-			fmt.Sprintf("⚠️  Команда '%s' уже существует в системе — возможно перекрытие!", m.fb.name)))
+	if m.state == statePrefixForm && m.collision != "" {
+		b.WriteString("\n" + warnStyle.Render("⚠️  "+m.collision))
 	}
 
 	if m.state.hasRunField() {

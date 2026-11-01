@@ -571,3 +571,97 @@ func TestUndoRemovedFlagCommandLeavesFlagScreen(t *testing.T) {
 		t.Fatalf("ожидался возврат к командам, state=%v flagCmdPath=%v", m.state, m.flagCmdPath)
 	}
 }
+
+// TestPrefixCollisionWarning — имя префикса проверяется на совпадение с
+// системной командой и с alias из ~/.zshrc; имена команд внутри префикса — нет.
+func TestPrefixCollisionWarning(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	if err := os.WriteFile(filepath.Join(home, ".zshrc"), []byte("alias gs='git status'\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	open := func(name string) model {
+		m := NewModel(&models.Config{Variables: map[string]string{}})
+		return feed(m,
+			tea.WindowSizeMsg{Width: 80, Height: 24},
+			tea.KeyMsg{Type: tea.KeyEnter}, // -> Префиксы
+			runes("n"), runes(name),
+		)
+	}
+
+	if m := open("ls"); !strings.Contains(m.collision, "уже есть в системе") {
+		t.Errorf("префикс 'ls' должен предупреждать о системной команде, получено %q", m.collision)
+	}
+	if m := open("gs"); !strings.Contains(m.collision, "alias") {
+		t.Errorf("префикс 'gs' должен предупреждать об alias, получено %q", m.collision)
+	}
+	if m := open("zzq_free"); m.collision != "" {
+		t.Errorf("свободное имя не должно давать предупреждения, получено %q", m.collision)
+	}
+
+	// Команда 'ls' внутри префикса ничего не перекрывает.
+	m := NewModel(&models.Config{Variables: map[string]string{}, Prefixes: []models.Prefix{{Name: "av"}}})
+	m = feed(m,
+		tea.WindowSizeMsg{Width: 80, Height: 24},
+		tea.KeyMsg{Type: tea.KeyEnter}, // Префиксы
+		tea.KeyMsg{Type: tea.KeyEnter}, // Команды av
+		runes("n"), runes("ls"),
+	)
+	if m.collision != "" || strings.Contains(m.View(), "⚠️") {
+		t.Errorf("имя команды не должно проверяться на коллизию, получено %q", m.collision)
+	}
+}
+
+// TestUndoKeepsOpenPrefixByName — undo, вернувший префикс перед открытым,
+// оставляет пользователя в том же префиксе, а не в соседнем по индексу.
+func TestUndoKeepsOpenPrefixByName(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	cfg := &models.Config{
+		Variables: map[string]string{},
+		Prefixes: []models.Prefix{
+			{Name: "av"},
+			{Name: "gx", Commands: []models.Command{{Name: "status"}}},
+		},
+	}
+	m := NewModel(cfg)
+	m = feed(m,
+		tea.WindowSizeMsg{Width: 80, Height: 24},
+		tea.KeyMsg{Type: tea.KeyEnter}, // Префиксы
+		runes("d"), runes("y"),         // удалить av -> остался gx
+		tea.KeyMsg{Type: tea.KeyEnter}, // войти в gx
+		runes("u"),                     // вернуть av (он встанет перед gx)
+	)
+	if m.state != stateCommandList {
+		t.Fatalf("ожидался список команд, получено %v", m.state)
+	}
+	if got := m.activePrefix().Name; got != "gx" {
+		t.Fatalf("после undo должен остаться открытым gx, открыт %q", got)
+	}
+	if !strings.Contains(m.View(), "gx · команды") {
+		t.Errorf("заголовок должен показывать gx:\n%s", m.View())
+	}
+}
+
+// TestUndoRenameKeepsOpenPrefix — undo переименования открытого префикса
+// оставляет пользователя в нём же (поиск по прежнему индексу).
+func TestUndoRenameKeepsOpenPrefix(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	cfg := &models.Config{
+		Variables: map[string]string{},
+		Prefixes:  []models.Prefix{{Name: "av"}, {Name: "gx", Commands: []models.Command{{Name: "st"}}}},
+	}
+	m := NewModel(cfg)
+	m = feed(m,
+		tea.WindowSizeMsg{Width: 80, Height: 24},
+		tea.KeyMsg{Type: tea.KeyEnter}, // Префиксы
+		runes("j"), runes("e"),         // редактировать gx
+	)
+	m.fb.name = "gy"
+	m.commitForm()
+	m = feed(m, tea.KeyMsg{Type: tea.KeyEnter}, runes("u")) // войти в gy, отменить переименование
+
+	if m.state != stateCommandList || m.activePrefix().Name != "gx" {
+		t.Fatalf("ожидался открытый gx, state=%v prefix=%q", m.state, m.activePrefix().Name)
+	}
+}

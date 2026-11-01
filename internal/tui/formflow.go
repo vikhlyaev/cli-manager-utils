@@ -1,11 +1,14 @@
 package tui
 
 import (
+	"fmt"
+	"os"
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/huh"
 
+	"cli-manager/internal/importer"
 	"cli-manager/internal/models"
 	"cli-manager/internal/validation"
 )
@@ -20,11 +23,12 @@ func (m *model) newFormBuffers() {
 	m.editIdx = -1
 	m.editKey = ""
 	m.lastName, m.lastRun = "", ""
+	m.aliases = nil
 	m.clearFormFeedback()
 }
 
 func (m *model) clearFormFeedback() {
-	m.collision = false
+	m.collision = ""
 	m.syntaxErr = ""
 	m.testOutput = ""
 	m.testErr = false
@@ -75,13 +79,12 @@ func (m model) updateForm(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
-// liveChecks обновляет неблокирующие подсказки: коллизию имени команды с
-// системными утилитами и синтаксис bash в поле run. bash запускается только
-// когда соответствующее поле изменилось.
+// liveChecks обновляет неблокирующие подсказки: коллизию имени префикса и
+// синтаксис bash в поле run. Проверки запускаются только когда поле изменилось.
 func (m *model) liveChecks() {
-	if m.state == stateCommandForm && m.fb.name != m.lastName {
+	if m.state == statePrefixForm && m.fb.name != m.lastName {
 		m.lastName = m.fb.name
-		m.collision = validation.CheckCollision(m.fb.name)
+		m.collision = m.prefixCollision(m.fb.name)
 	}
 	if m.state.hasRunField() && m.fb.run != m.lastRun {
 		m.lastRun = m.fb.run
@@ -90,6 +93,39 @@ func (m *model) liveChecks() {
 			m.syntaxErr = err.Error()
 		}
 	}
+}
+
+// prefixCollision сообщает, что перекроет префикс с именем name. Префикс —
+// это shell-функция, поэтому важны совпадения с командами из PATH/builtin и с
+// alias из rc-файла выбранной оболочки (при вызове alias срабатывает раньше
+// функции). Имена команд внутри префикса — лишь аргументы функции.
+func (m *model) prefixCollision(name string) string {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return ""
+	}
+	if validation.CheckCollision(name) {
+		return fmt.Sprintf("'%s' уже есть в системе — префикс перекроет эту команду", name)
+	}
+	rc := importer.RCPath(m.shellName())
+	if m.aliases == nil {
+		m.aliases = map[string]bool{}
+		if list, err := importer.LoadAliasesFrom(rc); err == nil {
+			for _, a := range list {
+				m.aliases[a.Name] = true
+			}
+		}
+	}
+	if m.aliases[name] {
+		return fmt.Sprintf("в %s есть alias '%s' — при вызове сработает он, а не префикс",
+			strings.Replace(rc, homeDir(), "~", 1), name)
+	}
+	return ""
+}
+
+func homeDir() string {
+	h, _ := os.UserHomeDir()
+	return h
 }
 
 // runTest выполняет bash-код из поля run (Ctrl+T) и сохраняет вывод для показа.

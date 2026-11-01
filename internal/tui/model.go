@@ -90,8 +90,9 @@ type model struct {
 
 	// Живые проверки формы. lastName/lastRun — значения, для которых проверка
 	// уже выполнена: bash запускается только когда поле действительно изменилось.
-	collision  bool
-	syntaxErr  string // ошибка `bash -n` для поля run (не блокирует ввод)
+	collision  string          // предупреждение: имя префикса перекрывает команду или alias
+	syntaxErr  string          // ошибка `bash -n` для поля run (не блокирует ввод)
+	aliases    map[string]bool // alias из rc-файла; читается один раз на форму
 	lastName   string
 	lastRun    string
 	testOutput string

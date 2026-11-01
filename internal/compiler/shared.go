@@ -149,7 +149,9 @@ func combineConditions(parent, own string) string {
 // renderDispatcher генерирует функцию-диспетчер префикса с рекурсивным разбором
 // вложенных подкоманд.
 func renderDispatcher(b *strings.Builder, p models.Prefix) {
-	fmt.Fprintf(b, "%s() {\n", p.Name)
+	// Форма `function name {`, а не `name() {`: если у пользователя есть alias с
+	// тем же именем, `name() {` раскрывается как alias и ломает весь скрипт.
+	fmt.Fprintf(b, "function %s {\n", p.Name)
 	renderDispatchLevel(b, p.Commands, 1, "__"+p.Name, p.Name, "", "    ")
 	b.WriteString("}\n\n")
 }

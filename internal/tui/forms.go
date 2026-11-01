@@ -130,7 +130,7 @@ func (m *model) initPrefixForm() tea.Cmd {
 			huh.NewInput().
 				Key("name").
 				Title("Имя префикса").
-				Description("Корневой шорткат, например: av").
+				Description("Корневой шорткат, например: av. Проверяется на коллизию с командами и alias").
 				Value(&m.fb.name).
 				Validate(m.validatePrefixName),
 			huh.NewInput().
@@ -149,7 +149,6 @@ func (m *model) initCommandForm() tea.Cmd {
 			huh.NewInput().
 				Key("name").
 				Title("Имя команды").
-				Description("Будет проверено на коллизию с системными командами").
 				Value(&m.fb.name).
 				Validate(m.validateCommandName),
 			huh.NewInput().

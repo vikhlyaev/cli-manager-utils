@@ -75,22 +75,24 @@ func (m *model) undo() {
 		m.setStatus("Нечего отменять")
 		return
 	}
+	prev := m.cfg
 	m.cfg = m.undoStack[len(m.undoStack)-1]
 	m.undoStack = m.undoStack[:len(m.undoStack)-1]
-	m.clampAndRefresh()
+	m.clampAndRefresh(prev)
 	if m.saveAndGenerate() {
 		m.setStatus("Отменено ✓")
 	}
 }
 
 // clampAndRefresh приводит активный префикс и пути к актуальным границам после
-// замены конфигурации (undo) и пересобирает списки. Если открытый экран
-// показывал исчезнувший узел, поднимается на уровень, который ещё существует.
-func (m *model) clampAndRefresh() {
+// замены конфигурации prev на m.cfg (undo) и пересобирает списки. Если открытый
+// экран показывал исчезнувший узел, поднимается на уровень, который ещё есть.
+func (m *model) clampAndRefresh(prev *models.Config) {
 	m.refreshPrefixList()
 	m.refreshVariableList()
 
-	if len(m.cfg.Prefixes) == 0 {
+	idx, ok := m.findActivePrefix(prev)
+	if !ok {
 		m.activePrefixIdx = 0
 		m.cmdPath, m.flagCmdPath = nil, nil
 		if m.state == stateCommandList || m.state == stateFlagList {
@@ -99,7 +101,7 @@ func (m *model) clampAndRefresh() {
 		return
 	}
 
-	m.activePrefixIdx = min(m.activePrefixIdx, len(m.cfg.Prefixes)-1)
+	m.activePrefixIdx = idx
 	m.cmdPath = m.validPathPrefix(m.cmdPath)
 	m.refreshCommandList()
 	if m.commandAt(m.flagCmdPath) != nil {
@@ -110,6 +112,25 @@ func (m *model) clampAndRefresh() {
 	if m.state == stateFlagList {
 		m.state = stateCommandList
 	}
+}
+
+// findActivePrefix ищет в m.cfg префикс, который был активным в prev: сначала
+// по имени (его индекс мог сдвинуться), а если имя исчезло, но число префиксов
+// не изменилось — по прежнему индексу (undo переименования). Иначе префикс
+// удалён, и показывать его команды нельзя.
+func (m *model) findActivePrefix(prev *models.Config) (int, bool) {
+	ps := m.cfg.Prefixes
+	if !inRange(m.activePrefixIdx, len(prev.Prefixes)) {
+		return 0, false
+	}
+	name := prev.Prefixes[m.activePrefixIdx].Name
+	if i := slices.IndexFunc(ps, func(p models.Prefix) bool { return p.Name == name }); i >= 0 {
+		return i, true
+	}
+	if len(ps) == len(prev.Prefixes) {
+		return m.activePrefixIdx, true
+	}
+	return 0, false
 }
 
 // toggleShell переключает целевую оболочку zsh↔bash и пересохраняет

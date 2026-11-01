@@ -20,7 +20,7 @@ func main() {
 	// (новые возможности генерации) попадали в generated.zsh даже без правок
 	// конфигурации. Ошибку не считаем фатальной — TUI всё равно запускаем.
 	if err := compiler.For(cfg.Shell).Generate(cfg); err != nil {
-		fmt.Fprintln(os.Stderr, "Предупреждение: не удалось перегенерировать zsh-скрипт:", err)
+		fmt.Fprintln(os.Stderr, "Предупреждение: не удалось перегенерировать скрипт:", err)
 	}
 
 	tui.Run(cfg)

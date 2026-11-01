@@ -6,6 +6,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
+	"cli-manager/internal/fsutil"
 	"cli-manager/internal/models"
 )
 
@@ -37,26 +38,23 @@ func LoadConfig() (*models.Config, error) {
 	return &cfg, nil
 }
 
-// SaveConfig сериализует конфигурацию в YAML и записывает на диск,
+// SaveConfig сериализует конфигурацию в YAML и атомарно записывает на диск,
 // создавая директорию при необходимости. Перед перезаписью предыдущая версия
 // файла копируется в config.yaml.bak — простой одноуровневый бэкап.
 func SaveConfig(cfg *models.Config) error {
-	path := ConfigPath()
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return err
-	}
-
-	// Бэкап текущего файла перед перезаписью (если он есть).
-	if existing, err := os.ReadFile(path); err == nil {
-		_ = os.WriteFile(path+".bak", existing, 0o644)
-	}
-
 	data, err := yaml.Marshal(cfg)
 	if err != nil {
 		return err
 	}
 
-	return os.WriteFile(path, data, 0o644)
+	path := ConfigPath()
+	// Бэкап текущего файла перед перезаписью (если он есть). Ошибка бэкапа не
+	// мешает сохранению: основной файл всё равно пишется атомарно.
+	if existing, err := os.ReadFile(path); err == nil {
+		_ = fsutil.WriteFileAtomic(path+".bak", existing, 0o644, nil)
+	}
+
+	return fsutil.WriteFileAtomic(path, data, 0o644, nil)
 }
 
 // CloneConfig возвращает глубокую копию конфигурации (через YAML round-trip).

@@ -23,15 +23,10 @@ func (ZshCompiler) OutputPath() string {
 	return filepath.Join(home, ".local", "share", "cli-manager", "generated.zsh")
 }
 
-// Generate собирает скрипт и записывает его на диск.
+// Generate собирает скрипт, проверяет его синтаксис и атомарно записывает на
+// диск. При синтаксической ошибке прежний скрипт не меняется.
 func (z ZshCompiler) Generate(cfg *models.Config) error {
-	script := z.render(cfg)
-
-	path := z.OutputPath()
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return err
-	}
-	return os.WriteFile(path, []byte(script), 0o644)
+	return writeScript(z.OutputPath(), "zsh", z.render(cfg))
 }
 
 // Render возвращает полный текст скрипта без записи на диск (для предпросмотра).

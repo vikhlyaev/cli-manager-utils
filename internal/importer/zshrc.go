@@ -22,10 +22,25 @@ func ZshrcPath() string {
 	return filepath.Join(home, ".zshrc")
 }
 
+// RCPath возвращает rc-файл интерактивной оболочки: ~/.bashrc для bash,
+// иначе ~/.zshrc.
+func RCPath(shell string) string {
+	if shell == "bash" {
+		home, _ := os.UserHomeDir()
+		return filepath.Join(home, ".bashrc")
+	}
+	return ZshrcPath()
+}
+
 // LoadAliases читает ~/.zshrc и разбирает определения alias. Отсутствие файла —
 // не ошибка: возвращается пустой список.
 func LoadAliases() ([]Alias, error) {
-	f, err := os.Open(ZshrcPath())
+	return LoadAliasesFrom(ZshrcPath())
+}
+
+// LoadAliasesFrom разбирает alias из rc-файла path. Отсутствие файла — не ошибка.
+func LoadAliasesFrom(path string) ([]Alias, error) {
+	f, err := os.Open(path)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil, nil
