@@ -129,7 +129,10 @@ func newList() list.Model {
 	l.SetShowTitle(false)
 	l.SetShowStatusBar(false)
 	l.SetShowHelp(false)
-	l.SetFilteringEnabled(false)
+	// Фильтр по `/`: строка поиска появляется только во время набора.
+	l.SetShowFilter(true)
+	l.SetFilteringEnabled(true)
+	l.FilterInput.Prompt = "Поиск: "
 	return l
 }
 

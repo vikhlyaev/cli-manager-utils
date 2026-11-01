@@ -715,3 +715,52 @@ func TestMenuFullPreview(t *testing.T) {
 		t.Errorf("в предпросмотре должны быть оба префикса:\n%s", content)
 	}
 }
+
+// TestFilterTypingDoesNotTriggerActions — пока набирается запрос, буквы
+// уходят в строку поиска, а не срабатывают как n/e/d.
+func TestFilterTypingDoesNotTriggerActions(t *testing.T) {
+	m := NewModel(&models.Config{Variables: map[string]string{}, Prefixes: []models.Prefix{{Name: "av"}}})
+	m = feed(m, tea.WindowSizeMsg{Width: 80, Height: 24}, tea.KeyMsg{Type: tea.KeyEnter},
+		runes("/"), runes("n"), runes("d"))
+	if m.state != statePrefixList || m.confirmDelete {
+		t.Fatalf("набор фильтра не должен открывать форму/удаление: state=%v confirm=%v", m.state, m.confirmDelete)
+	}
+	if got := m.prefixesList.FilterInput.Value(); got != "nd" {
+		t.Fatalf("текст фильтра = %q, ожидалось nd", got)
+	}
+}
+
+// TestFilteredSelectionUsesRealIndex — при применённом фильтре действия
+// работают с выбранным элементом, а не с элементом на той же позиции в
+// полном списке; esc сначала снимает фильтр.
+func TestFilteredSelectionUsesRealIndex(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	// Каждой ветке — своя модель: копии model делят конфиг по указателю.
+	filtered := func() model {
+		m := NewModel(&models.Config{Variables: map[string]string{}, Prefixes: []models.Prefix{
+			{Name: "av"}, {Name: "db"}, {Name: "gx"},
+		}})
+		m = feed(m, tea.WindowSizeMsg{Width: 80, Height: 24}, tea.KeyMsg{Type: tea.KeyEnter})
+		m.prefixesList.SetFilterText("gx")
+		return m
+	}
+
+	if v := filtered().View(); !strings.Contains(v, "фильтр: gx") {
+		t.Errorf("применённый фильтр должен быть виден:\n%s", v)
+	}
+
+	md := feed(filtered(), runes("d"), runes("y"))
+	if len(md.cfg.Prefixes) != 2 || md.cfg.Prefixes[0].Name != "av" || md.cfg.Prefixes[1].Name != "db" {
+		t.Fatalf("должен удалиться gx, осталось %+v", md.cfg.Prefixes)
+	}
+
+	me := feed(filtered(), tea.KeyMsg{Type: tea.KeyEnter})
+	if me.state != stateCommandList || me.activePrefixIdx != 2 {
+		t.Fatalf("enter должен открыть gx: state=%v idx=%d", me.state, me.activePrefixIdx)
+	}
+
+	mesc := feed(filtered(), tea.KeyMsg{Type: tea.KeyEsc})
+	if mesc.state != statePrefixList || mesc.prefixesList.IsFiltered() {
+		t.Fatalf("esc должен снять фильтр и остаться в списке: state=%v", mesc.state)
+	}
+}

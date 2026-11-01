@@ -17,7 +17,7 @@ func (m *model) refreshPrefixList() {
 	for i, p := range m.cfg.Prefixes {
 		items[i] = prefixItem{prefix: p}
 	}
-	m.prefixesList.SetItems(items)
+	setItems(&m.prefixesList, items)
 }
 
 func (m *model) refreshCommandList() {
@@ -26,7 +26,7 @@ func (m *model) refreshCommandList() {
 	for i, c := range cmds {
 		items[i] = commandItem{cmd: c}
 	}
-	m.commandsList.SetItems(items)
+	setItems(&m.commandsList, items)
 }
 
 func (m *model) refreshFlagList() {
@@ -38,7 +38,7 @@ func (m *model) refreshFlagList() {
 	for i, f := range c.Flags {
 		items[i] = flagItem{flag: f}
 	}
-	m.flagsList.SetItems(items)
+	setItems(&m.flagsList, items)
 }
 
 func (m *model) refreshVariableList() {
@@ -47,7 +47,17 @@ func (m *model) refreshVariableList() {
 	for i, k := range keys {
 		items[i] = variableItem{key: k, value: m.cfg.Variables[k]}
 	}
-	m.variablesList.SetItems(items)
+	setItems(&m.variablesList, items)
+}
+
+// setItems заменяет элементы списка, сбрасывая активный фильтр: при фильтре
+// bubbles пересчитывает совпадения асинхронно, и до пересчёта индексы
+// выбранного элемента указывали бы не туда.
+func setItems(l *list.Model, items []list.Item) {
+	if l.FilterState() != list.Unfiltered {
+		l.ResetFilter()
+	}
+	l.SetItems(items)
 }
 
 // refreshList пересобирает список, соответствующий экрану state.
@@ -118,6 +128,17 @@ func (m model) updateMainMenu(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 // list.Model (навигация).
 
 func (m *model) updateListKey(key tea.KeyMsg) (tea.Cmd, bool) {
+	if l := m.activeList(); l != nil {
+		// Пока набирается фильтр, все клавиши — это текст запроса.
+		if l.SettingFilter() {
+			return nil, false
+		}
+		// Esc сначала снимает применённый фильтр и только потом уводит назад.
+		if key.String() == "esc" && l.IsFiltered() {
+			l.ResetFilter()
+			return nil, true
+		}
+	}
 	// Отмена и справка доступны во всех списках.
 	switch key.String() {
 	case "u":
@@ -151,7 +172,7 @@ func (m *model) updatePrefixList(key tea.KeyMsg) (tea.Cmd, bool) {
 	case "e":
 		if selected {
 			m.newFormBuffers()
-			m.editIdx = m.prefixesList.Index()
+			m.editIdx = m.prefixesList.GlobalIndex()
 			m.fb.name = item.prefix.Name
 			m.fb.description = item.prefix.Description
 			return m.startForm(statePrefixForm, modeEdit), true
@@ -178,7 +199,7 @@ func (m *model) updatePrefixList(key tea.KeyMsg) (tea.Cmd, bool) {
 		return nil, true
 	case "enter":
 		if selected {
-			m.activePrefixIdx = m.prefixesList.Index()
+			m.activePrefixIdx = m.prefixesList.GlobalIndex()
 			m.cmdPath = nil
 			m.refreshCommandList()
 			m.commandsList.Select(0)
@@ -191,7 +212,7 @@ func (m *model) updatePrefixList(key tea.KeyMsg) (tea.Cmd, bool) {
 
 func (m *model) updateCommandList(key tea.KeyMsg) (tea.Cmd, bool) {
 	item, selected := m.commandsList.SelectedItem().(commandItem)
-	idx := m.commandsList.Index()
+	idx := m.commandsList.GlobalIndex()
 	switch key.String() {
 	case "esc":
 		// На уровень выше: к родительской команде, а с верхнего уровня — к префиксам.
@@ -260,7 +281,7 @@ func (m *model) updateFlagList(key tea.KeyMsg) (tea.Cmd, bool) {
 	case "e":
 		if selected {
 			m.newFormBuffers()
-			m.editIdx = m.flagsList.Index()
+			m.editIdx = m.flagsList.GlobalIndex()
 			m.fb.loadFlag(item.flag)
 			return m.startForm(stateFlagForm, modeEdit), true
 		}

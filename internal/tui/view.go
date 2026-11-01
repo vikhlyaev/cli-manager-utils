@@ -78,6 +78,9 @@ func (m model) listScreen(l list.Model, title, subtitle, emptyHint, hints string
 	if subtitle != "" {
 		b.WriteString("  " + hintStyle.Render("· "+subtitle))
 	}
+	if l.IsFiltered() {
+		b.WriteString("\n" + warnStyle.Render("фильтр: "+l.FilterValue()) + "  " + hintStyle.Render("[esc] сбросить"))
+	}
 	b.WriteString("\n\n")
 
 	if len(l.Items()) == 0 {
@@ -87,10 +90,13 @@ func (m model) listScreen(l list.Model, title, subtitle, emptyHint, hints string
 	}
 
 	b.WriteString("\n\n")
-	if m.confirmDelete {
+	switch {
+	case m.confirmDelete:
 		b.WriteString(warnStyle.Render(fmt.Sprintf("Удалить %s? ", m.deleteLabel)) +
 			hintStyle.Render("[y] да  [n] нет"))
-	} else {
+	case l.SettingFilter():
+		b.WriteString(hintStyle.Render("[enter] применить поиск  [esc] отмена"))
+	default:
 		b.WriteString(hintStyle.Render(hints))
 	}
 	if m.status != "" {

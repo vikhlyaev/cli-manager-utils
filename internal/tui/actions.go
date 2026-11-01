@@ -152,17 +152,17 @@ func (m *model) performDelete() {
 
 	switch m.state {
 	case statePrefixList:
-		if i := m.prefixesList.Index(); inRange(i, len(m.cfg.Prefixes)) {
+		if i := m.prefixesList.GlobalIndex(); inRange(i, len(m.cfg.Prefixes)) {
 			m.mutate(func() { m.cfg.Prefixes = slices.Delete(m.cfg.Prefixes, i, i+1) })
 		}
 	case stateCommandList:
 		children := m.childrenPtr()
-		if i := m.commandsList.Index(); inRange(i, len(*children)) {
+		if i := m.commandsList.GlobalIndex(); inRange(i, len(*children)) {
 			m.mutate(func() { *children = slices.Delete(*children, i, i+1) })
 		}
 	case stateFlagList:
 		if cmd := m.commandAt(m.flagCmdPath); cmd != nil {
-			if i := m.flagsList.Index(); inRange(i, len(cmd.Flags)) {
+			if i := m.flagsList.GlobalIndex(); inRange(i, len(cmd.Flags)) {
 				m.mutate(func() { cmd.Flags = slices.Delete(cmd.Flags, i, i+1) })
 			}
 		}
@@ -195,7 +195,7 @@ func (m *model) moveFlag(delta int) {
 
 // moveItem переставляет выбранный в l элемент (из n) на delta позиций.
 func (m *model) moveItem(l *list.Model, n, delta int, swap func(i, j int), refresh func()) {
-	i := l.Index()
+	i := l.GlobalIndex()
 	j := i + delta
 	if !inRange(i, n) || !inRange(j, n) {
 		return
