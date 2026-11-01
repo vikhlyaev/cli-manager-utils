@@ -69,7 +69,7 @@ func (z ZshCompiler) renderRaw(cfg *models.Config) string {
 		z.renderPrefix(&b, p)
 	}
 
-	renderReloadHook(&b, z.OutputPath(), cfg.Prefixes, zshReloadRegister)
+	renderReloadHook(&b, z.OutputPath(), cfg.Prefixes, zshReloadCleanup, zshReloadRegister)
 
 	return b.String()
 }
@@ -114,9 +114,9 @@ func (zshEmitter) emitCommands(b *strings.Builder, path string, cmds []models.Co
 	for _, c := range cmds {
 		entry := fmt.Sprintf("%s:%s", c.Name, c.Description)
 		if c.Condition != "" {
-			fmt.Fprintf(b, "            if %s; then __c+=(%s); fi\n", c.Condition, shQuote(entry))
+			fmt.Fprintf(b, "            if %s; then __c+=(%s); fi\n", c.Condition, shLiteral(entry))
 		} else {
-			fmt.Fprintf(b, "            __c+=(%s)\n", shQuote(entry))
+			fmt.Fprintf(b, "            __c+=(%s)\n", shLiteral(entry))
 		}
 	}
 	b.WriteString("            _describe -t commands 'команда' __c\n")
@@ -129,7 +129,7 @@ func (zshEmitter) emitLeaf(b *strings.Builder, path string, c models.Command) {
 		b.WriteString("            local -a __f\n")
 		for _, f := range c.Flags {
 			entry := fmt.Sprintf("%s:%s", f.Name, f.Description)
-			fmt.Fprintf(b, "            __f+=(%s)\n", shQuote(entry))
+			fmt.Fprintf(b, "            __f+=(%s)\n", shLiteral(entry))
 		}
 		b.WriteString("            _describe -t flags 'флаг' __f\n")
 	}
@@ -144,4 +144,9 @@ func (zshEmitter) emitLeaf(b *strings.Builder, path string, c models.Command) {
 const zshReloadRegister = `if [[ -o interactive ]] && autoload -Uz add-zsh-hook 2>/dev/null; then
     add-zsh-hook precmd __cli_manager_reload
 fi
+`
+
+// zshReloadCleanup снимает help-функции префикса и регистрацию автодополнения.
+const zshReloadCleanup = `        unfunction -m "__${__p}_*" 2>/dev/null
+        (( $+functions[compdef] )) && compdef -d "$__p" 2>/dev/null
 `

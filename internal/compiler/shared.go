@@ -56,10 +56,10 @@ func renderPrefixHeader(b *strings.Builder, p models.Prefix) {
 func renderHelpFns(b *strings.Builder, fnBase, usage, title string, cmds []models.Command) {
 	fmt.Fprintf(b, "%s_help() {\n", fnBase)
 	if title != "" {
-		fmt.Fprintf(b, "    echo %s\n", shQuote(title))
+		fmt.Fprintf(b, "    echo %s\n", shLiteral(title))
 		b.WriteString("    echo \"\"\n")
 	}
-	fmt.Fprintf(b, "    echo %s\n", shQuote("Использование: "+usage+" <команда> [аргументы]"))
+	fmt.Fprintf(b, "    echo %s\n", shLiteral("Использование: "+usage+" <команда> [аргументы]"))
 
 	if len(cmds) > 0 {
 		// Полностью разворачиваем дерево: показываем все подкоманды и флаги на
@@ -76,13 +76,13 @@ func renderHelpFns(b *strings.Builder, fnBase, usage, title string, cmds []model
 		}
 
 		b.WriteString("    echo \"\"\n")
-		fmt.Fprintf(b, "    echo %s\n", shQuote("Команды:"))
+		fmt.Fprintf(b, "    echo %s\n", shLiteral("Команды:"))
 		for _, r := range rows {
 			// Дополняем пробелами здесь, а не через printf %-Ns: оболочки
 			// считают ширину в байтах, и кириллица сбивала бы колонку.
 			pad := maxCol - len([]rune(r.indent)) - len([]rune(r.name))
 			text := r.indent + r.name + strings.Repeat(" ", pad) + "  " + r.desc
-			line := fmt.Sprintf("    printf '%%s\\n' %s\n", shQuote(strings.TrimRight(text, " ")))
+			line := fmt.Sprintf("    printf '%%s\\n' %s\n", shLiteral(strings.TrimRight(text, " ")))
 			if r.cond != "" {
 				fmt.Fprintf(b, "    if %s; then\n%s    fi\n", r.cond, line)
 			} else {
@@ -334,6 +334,12 @@ func shQuote(s string) string {
 	return `"` + r.Replace(s) + `"`
 }
 
+// shLiteral оборачивает текст в одинарные кавычки: никаких подстановок. Для
+// справки и описаний в автодополнении — там `$(...)` не должен выполняться.
+func shLiteral(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
+}
+
 // shCasePattern экранирует имя/путь для использования в качестве паттерна case.
 func shCasePattern(name string) string {
 	return "'" + strings.ReplaceAll(name, "'", `'\''`) + "'"
@@ -369,7 +375,14 @@ func enabledCommands(cmds []models.Command) []models.Command {
 			}
 		}
 		c.Flags = flags
-		c.Subcommands = enabledCommands(c.Subcommands)
+		if c.IsBranch() {
+			c.Subcommands = enabledCommands(c.Subcommands)
+			if len(c.Subcommands) == 0 {
+				// Все подкоманды выключены: ветвь целиком пропадает, а не
+				// превращается в лист с чужими флагами и действием по умолчанию.
+				continue
+			}
+		}
 		out = append(out, c)
 	}
 	return out
@@ -391,7 +404,10 @@ func StampPath(scriptPath string) string { return scriptPath + ".stamp" }
 // приглашением она читает stamp-файл и, если скрипт перегенерирован, снимает
 // функции прежних префиксов (чтобы удалённые исчезли) и заново подключает
 // скрипт. register — код регистрации хука для конкретной оболочки.
-func renderReloadHook(b *strings.Builder, scriptPath string, prefixes []models.Prefix, register string) {
+//
+// cleanup — код снятия остатков префикса $__p (help-функций и регистрации
+// автодополнения), свой для каждой оболочки.
+func renderReloadHook(b *strings.Builder, scriptPath string, prefixes []models.Prefix, cleanup, register string) {
 	names := make([]string, len(prefixes))
 	for i, p := range prefixes {
 		names[i] = p.Name
@@ -400,15 +416,20 @@ func renderReloadHook(b *strings.Builder, scriptPath string, prefixes []models.P
 	fmt.Fprintf(b, "__CLI_MANAGER_SCRIPT=%s\n", shQuote(scriptPath))
 	fmt.Fprintf(b, "__CLI_MANAGER_GEN=%s\n", shQuote(genPlaceholder))
 	fmt.Fprintf(b, "__CLI_MANAGER_PREFIXES=(%s)\n", strings.Join(names, " "))
+	// Хук сохраняет код возврата последней команды ($?): следующие хуки
+	// приглашения (starship, bash-preexec, вывод кода в prompt) должны видеть его.
 	b.WriteString(`__cli_manager_reload() {
-    local __stamp="$__CLI_MANAGER_SCRIPT.stamp" __gen __p
-    [[ -r "$__stamp" && -r "$__CLI_MANAGER_SCRIPT" ]] || return 0
+    local __rc=$? __stamp="$__CLI_MANAGER_SCRIPT.stamp" __gen __p
+    [[ -r "$__stamp" && -r "$__CLI_MANAGER_SCRIPT" ]] || return $__rc
     read -r __gen < "$__stamp"
-    [[ -z "$__gen" || "$__gen" == "$__CLI_MANAGER_GEN" ]] && return 0
+    [[ -z "$__gen" || "$__gen" == "$__CLI_MANAGER_GEN" ]] && return $__rc
     for __p in "${__CLI_MANAGER_PREFIXES[@]}"; do
         unset -f "$__p" "_${__p}_completions" 2>/dev/null
-    done
+`)
+	b.WriteString(cleanup)
+	b.WriteString(`    done
     source "$__CLI_MANAGER_SCRIPT"
+    return $__rc
 }
 `)
 	b.WriteString(register)

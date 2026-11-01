@@ -53,10 +53,12 @@ func TestReloadHook(t *testing.T) {
 				"cp " + v1dir + "/* " + filepath.Dir(path) + "/",
 				"source " + path,
 				"__cli_manager_reload", // без изменений — no-op
+				"false; __cli_manager_reload; echo RC_NOOP=$?",
 				"keep hi",
 				"cp " + v2dir + "/" + base + " " + v2dir + "/" + base + ".stamp " + filepath.Dir(path) + "/",
-				"__cli_manager_reload",
+				"false; __cli_manager_reload; echo RC_RELOAD=$?",
 				"keep hi",
+				"if typeset -f __old_help >/dev/null; then echo OLD_HELP_LEFT; fi",
 				"if type old >/dev/null 2>&1; then echo OLD_STILL_DEFINED; else echo OLD_GONE; fi",
 			}, "\n")
 			out, err := exec.Command(shell, "-c", script).CombinedOutput()
@@ -64,7 +66,11 @@ func TestReloadHook(t *testing.T) {
 			if err != nil {
 				t.Fatalf("ошибка оболочки: %v\n%s", err, s)
 			}
-			for _, want := range []string{"KEEP1", "KEEP2", "OLD_GONE"} {
+			if strings.Contains(s, "OLD_HELP_LEFT") {
+				t.Errorf("help-функции удалённого префикса должны сниматься:\n%s", s)
+			}
+			// Хук не должен портить код возврата последней команды.
+			for _, want := range []string{"KEEP1", "KEEP2", "OLD_GONE", "RC_NOOP=1", "RC_RELOAD=1"} {
 				if !strings.Contains(s, want) {
 					t.Errorf("нет %q в выводе:\n%s", want, s)
 				}

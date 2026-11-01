@@ -1,6 +1,7 @@
 package compiler
 
 import (
+	"os/exec"
 	"strings"
 	"testing"
 
@@ -57,10 +58,58 @@ func TestUsageInHelp(t *testing.T) {
 	}}}}
 	out := ZshCompiler{}.Render(cfg)
 	// "note <текст>" — 12 символов; описание ls выровнено по той же колонке.
-	if !strings.Contains(out, `printf '%s\n' "  note <текст>  заметка"`) {
+	if !strings.Contains(out, `printf '%s\n' '  note <текст>  заметка'`) {
 		t.Errorf("usage должен идти после имени:\n%s", out)
 	}
-	if !strings.Contains(out, `printf '%s\n' "  ls            список"`) {
+	if !strings.Contains(out, `printf '%s\n' '  ls            список'`) {
 		t.Errorf("колонка описаний должна учитывать usage:\n%s", out)
+	}
+}
+
+// TestBranchWithAllChildrenDisabled — ветвь, у которой выключены все
+// подкоманды, пропадает целиком, а не становится листом со своими флагами.
+func TestBranchWithAllChildrenDisabled(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	cfg := &models.Config{Prefixes: []models.Prefix{{Name: "av", Commands: []models.Command{
+		{Name: "db", Run: "echo FALLBACK", Flags: []models.Flag{{Name: "--stray", Run: "echo STRAY"}},
+			Subcommands: []models.Command{{Name: "up", Run: "echo UP", Disabled: true}}},
+		{Name: "ok", Run: "echo OK"},
+	}}}}
+	out := ZshCompiler{}.Render(cfg)
+	for _, gone := range []string{"'db'", "FALLBACK", "--stray", "UP"} {
+		if strings.Contains(out, gone) {
+			t.Errorf("%q не должно попадать в скрипт", gone)
+		}
+	}
+}
+
+// TestHelpTextIsLiteral — $(...) и $VAR в описаниях и usage печатаются как
+// есть и не выполняются при показе справки или автодополнении.
+func TestHelpTextIsLiteral(t *testing.T) {
+	for _, c := range []Compiler{ZshCompiler{}, BashCompiler{}} {
+		shell := "zsh"
+		if _, ok := c.(BashCompiler); ok {
+			shell = "bash"
+		}
+		t.Run(shell, func(t *testing.T) {
+			if _, err := exec.LookPath(shell); err != nil {
+				t.Skip(shell + " не установлен")
+			}
+			t.Setenv("HOME", t.TempDir())
+			cfg := &models.Config{Prefixes: []models.Prefix{{Name: "av", Description: "it's $HOME",
+				Commands: []models.Command{{Name: "x", Usage: "$FILE", Description: "$(echo PWNED) 'q'", Run: "true"}}}}}
+			if err := c.Generate(cfg); err != nil {
+				t.Fatal(err)
+			}
+			out, err := exec.Command(shell, "-c", "source "+c.OutputPath()+"; av").CombinedOutput()
+			if err != nil {
+				t.Fatalf("%v\n%s", err, out)
+			}
+			for _, want := range []string{"it's $HOME", "x $FILE", "$(echo PWNED) 'q'"} {
+				if !strings.Contains(string(out), want) {
+					t.Errorf("нет %q в справке:\n%s", want, out)
+				}
+			}
+		})
 	}
 }

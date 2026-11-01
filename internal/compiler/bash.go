@@ -68,7 +68,7 @@ func (bc BashCompiler) renderRaw(cfg *models.Config) string {
 		bc.renderPrefix(&b, p)
 	}
 
-	renderReloadHook(&b, bc.OutputPath(), cfg.Prefixes, bashReloadRegister)
+	renderReloadHook(&b, bc.OutputPath(), cfg.Prefixes, bashReloadCleanup, bashReloadRegister)
 
 	return b.String()
 }
@@ -141,4 +141,10 @@ func (bashEmitter) emitLeaf(b *strings.Builder, path string, c models.Command) {
 const bashReloadRegister = `if [[ $- == *i* && ";${PROMPT_COMMAND[*]};" != *__cli_manager_reload* ]]; then
     PROMPT_COMMAND="__cli_manager_reload${PROMPT_COMMAND:+;$PROMPT_COMMAND}"
 fi
+`
+
+// bashReloadCleanup снимает help-функции префикса и регистрацию автодополнения.
+const bashReloadCleanup = `        complete -r "$__p" 2>/dev/null
+        local __f
+        for __f in $(compgen -A function "__${__p}_"); do unset -f "$__f"; done
 `
