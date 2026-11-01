@@ -174,3 +174,13 @@ func TestDoctorCompinitDetection(t *testing.T) {
 		}
 	}
 }
+
+func TestUIInHelpAndBadFlag(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	if _, out, _ := run(t, "help"); !strings.Contains(out, "ui") {
+		t.Errorf("в справке нет ui: %q", out)
+	}
+	if code, _, _ := run(t, "ui", "--no-such-flag"); code != 2 {
+		t.Errorf("неизвестный флаг ui: code=%d", code)
+	}
+}

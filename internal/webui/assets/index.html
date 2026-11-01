@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>cli-manager</title>
+  <link rel="stylesheet" href="app.css">
+  <script src="app.js" defer></script>
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <span class="brand-mark">&gt;_</span>
+      <span class="brand-name">cli-manager</span>
+    </div>
+    <nav class="tabs" role="tablist">
+      <button class="tab" role="tab" data-tab="editor" aria-selected="true">Команды</button>
+      <button class="tab" role="tab" data-tab="vars" aria-selected="false">Переменные</button>
+      <button class="tab" role="tab" data-tab="preview" aria-selected="false">Скрипт</button>
+    </nav>
+    <div class="topbar-actions">
+      <label class="shell-select">
+        <span>Оболочка</span>
+        <select id="shell">
+          <option value="zsh">zsh</option>
+          <option value="bash">bash</option>
+        </select>
+      </label>
+      <span id="dirty" class="dirty" hidden>не сохранено</span>
+      <button id="save" class="btn btn-primary" disabled title="Сохранить (⌘S / Ctrl+S)">Сохранить</button>
+    </div>
+  </header>
+
+  <div id="banner" class="banner" hidden></div>
+
+  <main>
+    <section id="tab-editor" class="view view-editor">
+      <aside class="tree-pane">
+        <div class="pane-head">
+          <span class="pane-title">Префиксы</span>
+          <button id="add-prefix" class="btn btn-small">+ Префикс</button>
+        </div>
+        <input id="tree-filter" class="tree-filter" type="search" placeholder="Поиск…" aria-label="Поиск по дереву">
+        <ul id="tree" class="tree" role="tree"></ul>
+      </aside>
+      <section id="detail" class="detail-pane"></section>
+    </section>
+
+    <section id="tab-vars" class="view view-vars" hidden>
+      <div class="card">
+        <div class="pane-head">
+          <div>
+            <h2>Глобальные переменные</h2>
+            <p class="muted">Экспортируются в начале скрипта: <code>export NAME="значение"</code></p>
+          </div>
+          <button id="add-var" class="btn btn-small">+ Переменная</button>
+        </div>
+        <div id="vars" class="vars"></div>
+      </div>
+    </section>
+
+    <section id="tab-preview" class="view view-preview" hidden>
+      <div class="card">
+        <div class="pane-head">
+          <div>
+            <h2>Сгенерированный скрипт</h2>
+            <p class="muted">Превью несохранённого состояния. Файл: <code id="output-path"></code></p>
+          </div>
+          <button id="copy-script" class="btn btn-small">Копировать</button>
+        </div>
+        <pre id="script" class="script"></pre>
+      </div>
+    </section>
+  </main>
+
+  <footer id="problems" class="problems" hidden></footer>
+  <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+</body>
+</html>

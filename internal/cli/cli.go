@@ -32,6 +32,7 @@ func commands() []command {
 	return []command{
 		{name: "generate", summary: "перегенерировать скрипт из конфига", run: runGenerate},
 		{name: "init", summary: "подключить скрипт к ~/.zshrc или ~/.bashrc (--yes, --print)", run: runInit},
+		{name: "ui", summary: "открыть веб-интерфейс в браузере (--port, --no-open)", run: runUI},
 		{name: "doctor", summary: "проверить установку и конфиг", run: runDoctor},
 		{name: "path", summary: "напечатать путь к сгенерированному скрипту", run: runPath},
 		{name: "version", aliases: []string{"--version", "-v"}, summary: "показать версию", run: runVersion},
