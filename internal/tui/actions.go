@@ -1,0 +1,243 @@
+package tui
+
+import (
+	"fmt"
+	"slices"
+
+	"github.com/charmbracelet/bubbles/list"
+
+	"cli-manager/internal/compiler"
+	"cli-manager/internal/importer"
+	"cli-manager/internal/models"
+	"cli-manager/internal/storage"
+	"cli-manager/internal/validation"
+)
+
+// Все изменения конфигурации идут через mutate: снимок для undo → изменение →
+// сохранение на диск и перегенерация скрипта.
+
+func (m *model) setStatus(msg string) { m.status, m.statusErr = msg, false }
+func (m *model) setError(msg string)  { m.status, m.statusErr = msg, true }
+
+// mutate применяет изменение fn к конфигурации с поддержкой undo и сохраняет.
+func (m *model) mutate(fn func()) {
+	m.mutateIf(func() bool { fn(); return true })
+}
+
+// mutateIf — как mutate, но fn сообщает, изменила ли она что-то. Если нет,
+// снимок снимается с undo-стека и сохранения не происходит.
+func (m *model) mutateIf(fn func() bool) {
+	m.pushUndo()
+	if !fn() {
+		m.undoStack = m.undoStack[:len(m.undoStack)-1]
+		return
+	}
+	m.persist()
+}
+
+// persist сохраняет конфигурацию и регенерирует скрипт.
+func (m *model) persist() {
+	if m.saveAndGenerate() {
+		m.setStatus("Сохранено и скомпилировано ✓")
+	}
+}
+
+// saveAndGenerate пишет конфиг и скрипт; при ошибке выставляет статус и
+// возвращает false.
+func (m *model) saveAndGenerate() bool {
+	if err := storage.SaveConfig(m.cfg); err != nil {
+		m.setError("Ошибка сохранения: " + err.Error())
+		return false
+	}
+	if err := compiler.For(m.cfg.Shell).Generate(m.cfg); err != nil {
+		m.setError("Ошибка генерации " + m.shellName() + ": " + err.Error())
+		return false
+	}
+	return true
+}
+
+// pushUndo кладёт снимок текущей конфигурации в undo-стек.
+func (m *model) pushUndo() {
+	snap, err := storage.CloneConfig(m.cfg)
+	if err != nil {
+		return
+	}
+	m.undoStack = append(m.undoStack, snap)
+	if len(m.undoStack) > undoLimit {
+		m.undoStack = m.undoStack[len(m.undoStack)-undoLimit:]
+	}
+}
+
+// undo откатывает последнюю мутацию: восстанавливает снимок, обновляет экраны,
+// сохраняет его на диск и перегенерирует скрипт.
+func (m *model) undo() {
+	if len(m.undoStack) == 0 {
+		m.setStatus("Нечего отменять")
+		return
+	}
+	m.cfg = m.undoStack[len(m.undoStack)-1]
+	m.undoStack = m.undoStack[:len(m.undoStack)-1]
+	m.clampAndRefresh()
+	if m.saveAndGenerate() {
+		m.setStatus("Отменено ✓")
+	}
+}
+
+// clampAndRefresh приводит активный префикс и пути к актуальным границам после
+// замены конфигурации (undo) и пересобирает списки. Если открытый экран
+// показывал исчезнувший узел, поднимается на уровень, который ещё существует.
+func (m *model) clampAndRefresh() {
+	m.refreshPrefixList()
+	m.refreshVariableList()
+
+	if len(m.cfg.Prefixes) == 0 {
+		m.activePrefixIdx = 0
+		m.cmdPath, m.flagCmdPath = nil, nil
+		if m.state == stateCommandList || m.state == stateFlagList {
+			m.state = statePrefixList
+		}
+		return
+	}
+
+	m.activePrefixIdx = min(m.activePrefixIdx, len(m.cfg.Prefixes)-1)
+	m.cmdPath = m.validPathPrefix(m.cmdPath)
+	m.refreshCommandList()
+	if m.commandAt(m.flagCmdPath) != nil {
+		m.refreshFlagList()
+		return
+	}
+	m.flagCmdPath = nil
+	if m.state == stateFlagList {
+		m.state = stateCommandList
+	}
+}
+
+// toggleShell переключает целевую оболочку zsh↔bash и пересохраняет
+// конфигурацию (скрипт перегенерируется уже выбранным компилятором).
+func (m *model) toggleShell() {
+	if m.shellName() == "zsh" {
+		m.cfg.Shell = "bash"
+	} else {
+		m.cfg.Shell = "zsh"
+	}
+	m.persist()
+}
+
+// performDelete удаляет выбранный элемент после подтверждения. Пока ждём
+// подтверждения, навигация заблокирована, поэтому индекс списка — тот самый.
+func (m *model) performDelete() {
+	m.confirmDelete, m.deleteLabel = false, ""
+
+	switch m.state {
+	case statePrefixList:
+		if i := m.prefixesList.Index(); inRange(i, len(m.cfg.Prefixes)) {
+			m.mutate(func() { m.cfg.Prefixes = slices.Delete(m.cfg.Prefixes, i, i+1) })
+		}
+	case stateCommandList:
+		children := m.childrenPtr()
+		if i := m.commandsList.Index(); inRange(i, len(*children)) {
+			m.mutate(func() { *children = slices.Delete(*children, i, i+1) })
+		}
+	case stateFlagList:
+		if cmd := m.commandAt(m.flagCmdPath); cmd != nil {
+			if i := m.flagsList.Index(); inRange(i, len(cmd.Flags)) {
+				m.mutate(func() { cmd.Flags = slices.Delete(cmd.Flags, i, i+1) })
+			}
+		}
+	case stateVariableList:
+		if item, ok := m.variablesList.SelectedItem().(variableItem); ok {
+			m.mutate(func() { delete(m.cfg.Variables, item.key) })
+		}
+	}
+	m.refreshList(m.state)
+}
+
+// --- Перестановка ---
+// Порядок влияет на справку и автодополнение. Выделение следует за элементом.
+
+func (m *model) movePrefix(delta int) {
+	m.moveItem(&m.prefixesList, len(m.cfg.Prefixes), delta,
+		swapper(m.cfg.Prefixes), m.refreshPrefixList)
+}
+
+func (m *model) moveCommand(delta int) {
+	cs := *m.childrenPtr()
+	m.moveItem(&m.commandsList, len(cs), delta, swapper(cs), m.refreshCommandList)
+}
+
+func (m *model) moveFlag(delta int) {
+	if cmd := m.commandAt(m.flagCmdPath); cmd != nil {
+		m.moveItem(&m.flagsList, len(cmd.Flags), delta, swapper(cmd.Flags), m.refreshFlagList)
+	}
+}
+
+// moveItem переставляет выбранный в l элемент (из n) на delta позиций.
+func (m *model) moveItem(l *list.Model, n, delta int, swap func(i, j int), refresh func()) {
+	i := l.Index()
+	j := i + delta
+	if !inRange(i, n) || !inRange(j, n) {
+		return
+	}
+	m.mutate(func() { swap(i, j) })
+	refresh()
+	l.Select(j)
+}
+
+func swapper[T any](s []T) func(i, j int) {
+	return func(i, j int) { s[i], s[j] = s[j], s[i] }
+}
+
+// --- Импорт ---
+
+// importAliases читает alias из ~/.zshrc и добавляет их командами в префикс-
+// контейнер importedPrefix. Невалидные имена и уже существующие команды
+// пропускаются; пустой контейнер не создаётся.
+func (m *model) importAliases() {
+	aliases, err := importer.LoadAliases()
+	if err != nil {
+		m.setError("Импорт: не удалось прочитать ~/.zshrc: " + err.Error())
+		return
+	}
+
+	idx := slices.IndexFunc(m.cfg.Prefixes, func(p models.Prefix) bool {
+		return p.Name == importedPrefix
+	})
+	existing := map[string]bool{}
+	if idx >= 0 {
+		for _, c := range m.cfg.Prefixes[idx].Commands {
+			existing[c.Name] = true
+		}
+	}
+
+	var toAdd []models.Command
+	skipped := 0
+	for _, a := range aliases {
+		if validation.ValidateCommandName(a.Name) != nil || existing[a.Name] {
+			skipped++
+			continue
+		}
+		existing[a.Name] = true
+		toAdd = append(toAdd, models.Command{
+			Name: a.Name, Run: a.Value, Description: "импорт из ~/.zshrc",
+		})
+	}
+
+	if len(toAdd) == 0 {
+		m.setStatus(fmt.Sprintf("Импорт: нечего добавлять (пропущено %d)", skipped))
+		return
+	}
+
+	m.mutate(func() {
+		if idx < 0 {
+			m.cfg.Prefixes = append(m.cfg.Prefixes, models.Prefix{
+				Name: importedPrefix, Description: "Импортированные алиасы из ~/.zshrc",
+			})
+			idx = len(m.cfg.Prefixes) - 1
+		}
+		m.cfg.Prefixes[idx].Commands = append(m.cfg.Prefixes[idx].Commands, toAdd...)
+	})
+	m.refreshPrefixList()
+	if !m.statusErr { // не затираем ошибку сохранения
+		m.setStatus(fmt.Sprintf("Импорт: добавлено %d, пропущено %d", len(toAdd), skipped))
+	}
+}

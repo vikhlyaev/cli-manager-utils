@@ -6,6 +6,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/huh"
 
+	"cli-manager/internal/models"
 	"cli-manager/internal/validation"
 )
 
@@ -25,6 +26,30 @@ type formBuffers struct {
 	acceptsArgs bool
 }
 
+func (fb *formBuffers) loadCommand(c models.Command) {
+	fb.name, fb.description, fb.run = c.Name, c.Description, c.Run
+	fb.acceptsArgs, fb.condition = c.AcceptsArgs, c.Condition
+}
+
+// command собирает команду из буфера (без флагов и подкоманд).
+func (fb *formBuffers) command() models.Command {
+	return models.Command{
+		Name:        fb.name,
+		Description: fb.description,
+		Run:         fb.run,
+		AcceptsArgs: fb.acceptsArgs,
+		Condition:   fb.condition,
+	}
+}
+
+func (fb *formBuffers) loadFlag(f models.Flag) {
+	fb.name, fb.description, fb.run = f.Name, f.Description, f.Run
+}
+
+func (fb *formBuffers) flag() models.Flag {
+	return models.Flag{Name: fb.name, Description: fb.description, Run: fb.run}
+}
+
 // validatePrefixName проверяет формат имени префикса (имя zsh-функции) и его
 // уникальность среди существующих префиксов (исключая редактируемый).
 func (m *model) validatePrefixName(s string) error {
@@ -32,52 +57,49 @@ func (m *model) validatePrefixName(s string) error {
 		return err
 	}
 	for i, p := range m.cfg.Prefixes {
-		if m.formMode == modeEdit && i == m.activePrefixIdx {
-			continue
-		}
-		if p.Name == s {
+		if !m.isEdited(i) && p.Name == s {
 			return fmt.Errorf("префикс %q уже существует", s)
 		}
 	}
 	return nil
 }
 
-// validateCommandName проверяет формат имени команды и уникальность в пределах
-// активного префикса (исключая редактируемую команду).
+// validateCommandName проверяет формат имени команды и уникальность на текущем
+// уровне дерева (исключая редактируемую команду).
 func (m *model) validateCommandName(s string) error {
 	if err := validation.ValidateCommandName(s); err != nil {
 		return err
 	}
-	for i, c := range m.cfg.Prefixes[m.activePrefixIdx].Commands {
-		if m.formMode == modeEdit && i == m.activeCommandIdx {
-			continue
-		}
-		if c.Name == s {
-			return fmt.Errorf("команда %q уже существует в префиксе", s)
+	for i, c := range *m.childrenPtr() {
+		if !m.isEdited(i) && c.Name == s {
+			return fmt.Errorf("команда %q уже существует на этом уровне", s)
 		}
 	}
 	return nil
 }
 
-// validateFlagName проверяет формат имени флага и уникальность в пределах
-// активной команды (исключая редактируемый флаг).
+// validateFlagName проверяет формат имени флага и уникальность среди флагов
+// открытой команды (исключая редактируемый флаг).
 func (m *model) validateFlagName(s string) error {
 	if err := validation.ValidateFlagName(s); err != nil {
 		return err
 	}
-	var editIdx = -1
-	if m.formMode == modeEdit {
-		fmt.Sscanf(m.editKey, "%d", &editIdx)
+	cmd := m.commandAt(m.flagCmdPath)
+	if cmd == nil {
+		return nil
 	}
-	for i, f := range m.cfg.Prefixes[m.activePrefixIdx].Commands[m.activeCommandIdx].Flags {
-		if i == editIdx {
-			continue
-		}
-		if f.Name == s {
+	for i, f := range cmd.Flags {
+		if !m.isEdited(i) && f.Name == s {
 			return fmt.Errorf("флаг %q уже существует у команды", s)
 		}
 	}
 	return nil
+}
+
+// isEdited сообщает, что элемент с индексом i — тот, который сейчас правится
+// (его имя не конфликтует само с собой).
+func (m *model) isEdited(i int) bool {
+	return m.formMode == modeEdit && i == m.editIdx
 }
 
 // validateVariableName проверяет формат имени переменной и уникальность ключа

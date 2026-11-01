@@ -442,3 +442,132 @@ func TestEditPrefixPrefills(t *testing.T) {
 		t.Fatalf("форма редактирования не предзаполнена: %+v", m.fb)
 	}
 }
+
+// TestValidateCommandNameChecksCurrentLevel — уникальность имени команды
+// проверяется на текущем уровне дерева, а не среди команд верхнего уровня.
+func TestValidateCommandNameChecksCurrentLevel(t *testing.T) {
+	cfg := &models.Config{
+		Variables: map[string]string{},
+		Prefixes: []models.Prefix{{Name: "av", Commands: []models.Command{
+			{Name: "db", Subcommands: []models.Command{{Name: "migrate"}}},
+			{Name: "deploy"},
+		}}},
+	}
+	m := NewModel(cfg)
+	m.cmdPath = []int{0} // внутри db
+	m.formMode = modeCreate
+
+	if err := m.validateCommandName("migrate"); err == nil {
+		t.Error("дубль 'migrate' на уровне db должен отклоняться")
+	}
+	if err := m.validateCommandName("deploy"); err != nil {
+		t.Errorf("'deploy' есть только на верхнем уровне, внутри db имя свободно: %v", err)
+	}
+
+	m.formMode, m.editIdx = modeEdit, 0 // правим сам migrate
+	if err := m.validateCommandName("migrate"); err != nil {
+		t.Errorf("редактируемая команда не должна конфликтовать сама с собой: %v", err)
+	}
+}
+
+// TestValidateFlagNameUsesOpenCommand — уникальность флага проверяется среди
+// флагов открытой команды; раньше брались флаги не той команды, а индекс
+// с вложенного уровня мог выйти за границы и уронить приложение.
+func TestValidateFlagNameUsesOpenCommand(t *testing.T) {
+	cfg := &models.Config{
+		Variables: map[string]string{},
+		Prefixes: []models.Prefix{{Name: "av", Commands: []models.Command{
+			{Name: "db", Subcommands: []models.Command{
+				{Name: "a"}, {Name: "b"}, {Name: "up", Flags: []models.Flag{{Name: "--force"}}},
+			}},
+		}}},
+	}
+	m := NewModel(cfg)
+	m.flagCmdPath = []int{0, 2} // av db up
+	m.formMode = modeCreate
+
+	if err := m.validateFlagName("--force"); err == nil {
+		t.Error("дубль '--force' у команды up должен отклоняться")
+	}
+	if err := m.validateFlagName("--dry-run"); err != nil {
+		t.Errorf("новый флаг должен проходить: %v", err)
+	}
+}
+
+// TestEditFlagReplacesInPlace — правка флага заменяет его на месте, не добавляя новый.
+func TestEditFlagReplacesInPlace(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	cfg := &models.Config{
+		Variables: map[string]string{},
+		Prefixes: []models.Prefix{{Name: "av", Commands: []models.Command{
+			{Name: "deploy", Flags: []models.Flag{{Name: "--a"}, {Name: "--b"}}},
+		}}},
+	}
+	m := NewModel(cfg)
+	m = feed(m,
+		tea.WindowSizeMsg{Width: 80, Height: 24},
+		tea.KeyMsg{Type: tea.KeyEnter}, // Префиксы
+		tea.KeyMsg{Type: tea.KeyEnter}, // Команды
+		tea.KeyMsg{Type: tea.KeyEnter}, // deploy — лист -> флаги
+		runes("j"),                     // выбрать --b
+		runes("e"),                     // редактировать
+	)
+	m.fb.name = "--c"
+	m.commitForm()
+
+	fs := m.cfg.Prefixes[0].Commands[0].Flags
+	if len(fs) != 2 || fs[0].Name != "--a" || fs[1].Name != "--c" {
+		t.Fatalf("ожидались --a,--c, получено %+v", fs)
+	}
+	if m.state != stateFlagList {
+		t.Errorf("после сохранения ожидался список флагов, получено %v", m.state)
+	}
+}
+
+// TestUndoCreatedPrefixLeavesCommandScreen — отмена создания префикса, внутри
+// которого стоит пользователь, возвращает к списку префиксов (раньше View падал
+// с index out of range).
+func TestUndoCreatedPrefixLeavesCommandScreen(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	m := NewModel(&models.Config{Variables: map[string]string{}})
+	m = feed(m,
+		tea.WindowSizeMsg{Width: 80, Height: 24},
+		tea.KeyMsg{Type: tea.KeyEnter}, // -> Префиксы
+		runes("n"), runes("av"),
+	)
+	m.commitForm()
+	m = feed(m, tea.KeyMsg{Type: tea.KeyEnter}) // внутрь av
+	if m.state != stateCommandList {
+		t.Fatalf("ожидался список команд, получено %v", m.state)
+	}
+
+	m = feed(m, runes("u"))
+	if len(m.cfg.Prefixes) != 0 || m.state != statePrefixList {
+		t.Fatalf("после отмены ожидался пустой список префиксов, state=%v prefixes=%+v", m.state, m.cfg.Prefixes)
+	}
+	_ = m.View() // не должно паниковать
+}
+
+// TestUndoRemovedFlagCommandLeavesFlagScreen — если undo убрал команду, чьи
+// флаги открыты, экран поднимается к списку команд, а не остаётся на устаревших флагах.
+func TestUndoRemovedFlagCommandLeavesFlagScreen(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	cfg := &models.Config{Variables: map[string]string{}, Prefixes: []models.Prefix{{Name: "av"}}}
+	m := NewModel(cfg)
+	m = feed(m,
+		tea.WindowSizeMsg{Width: 80, Height: 24},
+		tea.KeyMsg{Type: tea.KeyEnter}, // Префиксы
+		tea.KeyMsg{Type: tea.KeyEnter}, // Команды av
+		runes("n"), runes("x"),
+	)
+	m.commitForm()
+	m = feed(m, tea.KeyMsg{Type: tea.KeyEnter}) // x — лист -> флаги
+	if m.state != stateFlagList {
+		t.Fatalf("ожидался список флагов, получено %v", m.state)
+	}
+
+	m = feed(m, runes("u"))
+	if m.state != stateCommandList || m.flagCmdPath != nil {
+		t.Fatalf("ожидался возврат к командам, state=%v flagCmdPath=%v", m.state, m.flagCmdPath)
+	}
+}
