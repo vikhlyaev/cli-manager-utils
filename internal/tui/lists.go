@@ -93,16 +93,21 @@ func (m model) updateMainMenu(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 	case "q":
 		return m, tea.Quit
+	case "?":
+		m.openHelp()
 	case "enter":
 		switch m.menuIndex {
-		case 0:
+		case menuPrefixes:
 			m.refreshPrefixList()
 			m.state = statePrefixList
-		case 1:
+		case menuVariables:
 			m.refreshVariableList()
 			m.state = stateVariableList
-		case 2:
+		case menuShell:
 			m.toggleShell()
+		case menuPreview:
+			m.openPreview(fmt.Sprintf("Предпросмотр %s · весь скрипт", m.shellName()),
+				compiler.For(m.cfg.Shell).Render(m.cfg))
 		}
 	}
 	return m, nil
@@ -113,9 +118,13 @@ func (m model) updateMainMenu(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 // list.Model (навигация).
 
 func (m *model) updateListKey(key tea.KeyMsg) (tea.Cmd, bool) {
-	// Отмена последней мутации доступна во всех списках.
-	if key.String() == "u" {
+	// Отмена и справка доступны во всех списках.
+	switch key.String() {
+	case "u":
 		m.undo()
+		return nil, true
+	case "?":
+		m.openHelp()
 		return nil, true
 	}
 	switch m.state {
@@ -311,6 +320,11 @@ func (m *model) askDelete(label string) {
 func (m *model) previewPrefix(p models.Prefix) {
 	content := compiler.For(m.cfg.Shell).RenderPrefix(p)
 	m.openPreview(fmt.Sprintf("Предпросмотр %s · префикс '%s'", m.shellName(), p.Name), content)
+}
+
+// openHelp показывает полный список клавиш в окне предпросмотра.
+func (m *model) openHelp() {
+	m.openPreview(helpTitle, helpText)
 }
 
 // openPreview наполняет viewport содержимым и переключается на экран

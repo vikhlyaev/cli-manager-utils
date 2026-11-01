@@ -28,6 +28,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 
 	if key, ok := msg.(tea.KeyMsg); ok {
+		// Статус относится к последнему действию: следующее нажатие его убирает.
+		m.status, m.statusErr = "", false
 		if m.state == stateMainMenu {
 			return m.updateMainMenu(key)
 		}

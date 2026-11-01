@@ -19,22 +19,22 @@ func (m model) View() string {
 		return m.listScreen(m.prefixesList,
 			"CLI Manager · Префиксы", "наборы команд верхнего уровня",
 			"Пока пусто. Нажмите [n], чтобы создать первый префикс.",
-			"[n] новый  [e] изменить  [d] удалить  [⇧↑/↓] порядок  [p] "+m.shellName()+"  [i] импорт  [u] отмена  [enter] открыть  [esc] меню")
+			"[enter] открыть  [n] новый  [e] изменить  [d] удалить  [p] "+m.shellName()+"  [?] все клавиши  [esc] меню")
 	case stateCommandList:
 		return m.listScreen(m.commandsList,
 			m.breadcrumb(m.cmdPath)+" · команды", "Enter: лист → флаги, ветвь → вглубь",
 			"Команд нет. Нажмите [n], чтобы добавить команду.",
-			"[enter] лист→флаги/ветвь→вглубь  [s] подкоманды  [f] флаги  [n] новая  [e] изм  [d] удал  [⇧↑/↓] порядок  [p] "+m.shellName()+"  [u] отмена  [esc] назад")
+			"[enter] открыть  [s] подкоманды  [f] флаги  [n] новая  [e] изменить  [d] удалить  [?] все клавиши  [esc] назад")
 	case stateFlagList:
 		return m.listScreen(m.flagsList,
 			m.breadcrumb(m.flagCmdPath)+" · флаги", "опции команды-листа",
 			"Флагов нет. Нажмите [n], чтобы добавить флаг.",
-			"[n] новый  [e] изменить  [d] удалить  [⇧↑/↓] порядок  [u] отмена  [esc] назад")
+			"[n] новый  [e] изменить  [d] удалить  [⇧↑/↓] порядок  [?] все клавиши  [esc] назад")
 	case stateVariableList:
 		return m.listScreen(m.variablesList,
 			"CLI Manager · Глобальные переменные", "ключ → значение, экспортируются в скрипт",
 			"Переменных нет. Нажмите [n], чтобы добавить переменную.",
-			"[n] новая  [e] изменить  [d] удалить  [u] отмена  [esc] меню")
+			"[n] новая  [e] изменить  [d] удалить  [u] отмена  [?] все клавиши  [esc] меню")
 	case statePreview:
 		return m.viewPreview()
 	}
@@ -55,7 +55,10 @@ func (m model) viewMainMenu() string {
 		}
 		b.WriteString(cursor + line + "\n")
 	}
-	b.WriteString("\n" + hintStyle.Render("[↑/↓] выбор  [enter] открыть  [q] выход"))
+	b.WriteString("\n" + hintStyle.Render("[↑/↓] выбор  [enter] открыть  [?] клавиши  [q] выход"))
+	if m.configWarn != "" {
+		b.WriteString("\n\n" + warnStyle.Render(m.configWarn))
+	}
 	if m.notSourced {
 		b.WriteString("\n\n" + warnStyle.Render("⚠ Скрипт не подключён к "+importer.RCPath(m.shellName())+
 			" — выполните: cli-manager init"))
@@ -102,6 +105,9 @@ func (m model) viewPreview() string {
 	path := compiler.For(m.cfg.Shell).OutputPath()
 	header := headerStyle.Render(m.previewTitle) + "\n" + hintStyle.Render("Файл: "+path)
 	hints := hintStyle.Render("[↑/↓] прокрутка  [esc] назад")
+	if m.previewTitle == helpTitle {
+		return docStyle.Render(headerStyle.Render(m.previewTitle) + "\n\n" + m.previewVP.View() + "\n\n" + hints)
+	}
 	return docStyle.Render(header + "\n\n" + m.previewVP.View() + "\n\n" + hints)
 }
 

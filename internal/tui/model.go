@@ -112,6 +112,9 @@ type model struct {
 	previewTitle  string       // заголовок над окном предпросмотра
 	previousState sessionState // куда вернуться по Esc из предпросмотра
 
+	// configWarn — проблемы конфига, найденные при запуске (постоянная строка меню).
+	configWarn string
+
 	// notSourced — скрипт не подключён в rc-файле оболочки (подсказка в меню).
 	notSourced bool
 
@@ -158,10 +161,18 @@ func (m model) shellName() string {
 	return "zsh"
 }
 
-// menuItems формирует пункты главного меню; третий пункт показывает и
+// Пункты главного меню (индексы в menuItems).
+const (
+	menuPrefixes = iota
+	menuVariables
+	menuShell
+	menuPreview
+)
+
+// menuItems формирует пункты главного меню; пункт оболочки показывает и
 // переключает целевую оболочку.
 func (m model) menuItems() []string {
-	return []string{"Префиксы", "Глобальные переменные", "Оболочка: " + m.shellName()}
+	return []string{"Префиксы", "Глобальные переменные", "Оболочка: " + m.shellName(), "Предпросмотр всего скрипта"}
 }
 
 // sortedKeys возвращает ключи карты в отсортированном порядке.
@@ -188,7 +199,7 @@ func Run(cfg *models.Config) {
 	m := NewModel(cfg)
 	m.checkSourced()
 	if ps := validation.ValidateConfig(cfg); len(ps) > 0 {
-		m.setError(fmt.Sprintf("⚠ В конфиге проблем: %d (первая — %s). Подробнее: cli-manager doctor", len(ps), ps[0]))
+		m.configWarn = fmt.Sprintf("⚠ В конфиге проблем: %d (первая — %s). Подробнее: cli-manager doctor", len(ps), ps[0])
 	}
 	p := tea.NewProgram(m, tea.WithAltScreen())
 	if _, err := p.Run(); err != nil {

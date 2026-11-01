@@ -665,3 +665,53 @@ func TestUndoRenameKeepsOpenPrefix(t *testing.T) {
 		t.Fatalf("ожидался открытый gx, state=%v prefix=%q", m.state, m.activePrefix().Name)
 	}
 }
+
+// TestHelpScreen — `?` открывает справку из меню и из списков, esc возвращает назад.
+func TestHelpScreen(t *testing.T) {
+	m := NewModel(&models.Config{Variables: map[string]string{}})
+	m = feed(m, tea.WindowSizeMsg{Width: 80, Height: 30}, runes("?"))
+	if m.state != statePreview || m.previewTitle != helpTitle {
+		t.Fatalf("из меню: state=%v title=%q", m.state, m.previewTitle)
+	}
+	m = feed(m, tea.KeyMsg{Type: tea.KeyEsc}, tea.KeyMsg{Type: tea.KeyEnter}, runes("?"))
+	if m.state != statePreview || !strings.Contains(m.View(), "все клавиши") {
+		t.Fatalf("из списка префиксов справка не открылась: state=%v", m.state)
+	}
+	m = feed(m, tea.KeyMsg{Type: tea.KeyEsc})
+	if m.state != statePrefixList {
+		t.Fatalf("esc должен вернуть к списку, state=%v", m.state)
+	}
+}
+
+// TestStatusClearedOnNextKey — статус последнего действия исчезает при
+// следующем нажатии, а не висит до конца сессии.
+func TestStatusClearedOnNextKey(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	m := NewModel(&models.Config{Variables: map[string]string{}, Prefixes: []models.Prefix{{Name: "av"}}})
+	m = feed(m, tea.WindowSizeMsg{Width: 80, Height: 24}, tea.KeyMsg{Type: tea.KeyEnter}, runes("u"))
+	if m.status != "Нечего отменять" {
+		t.Fatalf("status=%q", m.status)
+	}
+	m = feed(m, runes("j"))
+	if m.status != "" {
+		t.Fatalf("статус должен сброситься, получено %q", m.status)
+	}
+}
+
+// TestMenuFullPreview — пункт меню показывает весь скрипт со всеми префиксами.
+func TestMenuFullPreview(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	m := NewModel(&models.Config{Variables: map[string]string{}, Prefixes: []models.Prefix{{Name: "av"}, {Name: "gx"}}})
+	m = feed(m, tea.WindowSizeMsg{Width: 80, Height: 200})
+	for range menuPreview {
+		m = feed(m, runes("j"))
+	}
+	m = feed(m, tea.KeyMsg{Type: tea.KeyEnter})
+	if m.state != statePreview {
+		t.Fatalf("state=%v", m.state)
+	}
+	content := m.previewVP.View()
+	if !strings.Contains(content, "function av {") || !strings.Contains(content, "function gx {") {
+		t.Errorf("в предпросмотре должны быть оба префикса:\n%s", content)
+	}
+}

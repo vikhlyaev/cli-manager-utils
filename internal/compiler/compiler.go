@@ -14,6 +14,8 @@ type Compiler interface {
 	Generate(cfg *models.Config) error
 	// OutputPath возвращает путь, по которому сохраняется сгенерированный скрипт.
 	OutputPath() string
+	// Render возвращает полный текст скрипта без записи на диск (для предпросмотра).
+	Render(cfg *models.Config) string
 	// RenderPrefix возвращает сгенерированный фрагмент для одного префикса
 	// (для предпросмотра).
 	RenderPrefix(p models.Prefix) string
