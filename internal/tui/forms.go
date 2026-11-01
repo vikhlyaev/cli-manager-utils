@@ -25,12 +25,13 @@ type formBuffers struct {
 	run         string
 	value       string
 	condition   string
+	usage       string
 	acceptsArgs bool
 }
 
 func (fb *formBuffers) loadCommand(c models.Command) {
 	fb.name, fb.description, fb.run = c.Name, c.Description, c.Run
-	fb.acceptsArgs, fb.condition = c.AcceptsArgs, c.Condition
+	fb.acceptsArgs, fb.condition, fb.usage = c.AcceptsArgs, c.Condition, c.Usage
 }
 
 // command собирает команду из буфера (без флагов и подкоманд).
@@ -41,6 +42,7 @@ func (fb *formBuffers) command() models.Command {
 		Run:         trimRun(fb.run),
 		AcceptsArgs: fb.acceptsArgs,
 		Condition:   fb.condition,
+		Usage:       strings.TrimSpace(fb.usage),
 	}
 }
 
@@ -188,6 +190,11 @@ func (m *model) initCommandForm() tea.Cmd {
 				Key("accepts_args").
 				Title("Принимает аргументы ($@)?").
 				Value(&m.fb.acceptsArgs),
+			huh.NewInput().
+				Key("usage").
+				Title("Аргументы для справки (необязательно)").
+				Description("Напр.: <файл> [строки] — показывается в av --help").
+				Value(&m.fb.usage),
 			huh.NewInput().
 				Key("condition").
 				Title("Условие автодополнения (необязательно)").

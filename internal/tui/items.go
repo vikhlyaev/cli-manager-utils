@@ -52,7 +52,9 @@ func (i commandItem) Description() string {
 	} else {
 		meta = fmt.Sprintf("флагов: %d", len(i.cmd.Flags))
 	}
-	if i.cmd.AcceptsArgs {
+	if i.cmd.Usage != "" {
+		meta += " · " + i.cmd.Usage
+	} else if i.cmd.AcceptsArgs {
 		meta += " · принимает аргументы"
 	}
 	if i.cmd.Condition != "" {

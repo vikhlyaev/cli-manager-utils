@@ -46,3 +46,21 @@ func TestDisabledSkipped(t *testing.T) {
 		t.Error("фильтрация не должна менять исходный конфиг")
 	}
 }
+
+// TestUsageInHelp — описание аргументов выводится в справке рядом с именем,
+// а колонка описаний выравнивается с его учётом.
+func TestUsageInHelp(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	cfg := &models.Config{Prefixes: []models.Prefix{{Name: "av", Commands: []models.Command{
+		{Name: "note", Usage: "<текст>", Description: "заметка", Run: "echo"},
+		{Name: "ls", Description: "список", Run: "ls"},
+	}}}}
+	out := ZshCompiler{}.Render(cfg)
+	// "note <текст>" — 12 символов; описание ls выровнено по той же колонке.
+	if !strings.Contains(out, `printf '%s\n' "  note <текст>  заметка"`) {
+		t.Errorf("usage должен идти после имени:\n%s", out)
+	}
+	if !strings.Contains(out, `printf '%s\n' "  ls            список"`) {
+		t.Errorf("колонка описаний должна учитывать usage:\n%s", out)
+	}
+}

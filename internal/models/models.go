@@ -16,9 +16,11 @@ type Flag struct {
 // генерации они имеют приоритет над Flags, а Run используется как действие по
 // умолчанию, когда подкоманда не распознана.
 type Command struct {
-	Name        string    `yaml:"name"`
-	Description string    `yaml:"description,omitempty"`
-	Run         string    `yaml:"run,omitempty"`
+	Name        string `yaml:"name"`
+	Description string `yaml:"description,omitempty"`
+	Run         string `yaml:"run,omitempty"`
+	// Usage — описание аргументов для справки, напр. "<файл> [строки]".
+	Usage       string    `yaml:"usage,omitempty"`
 	AcceptsArgs bool      `yaml:"accepts_args,omitempty"`
 	Condition   string    `yaml:"condition,omitempty"`
 	Flags       []Flag    `yaml:"flags,omitempty"`

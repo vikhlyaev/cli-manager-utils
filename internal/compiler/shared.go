@@ -78,11 +78,11 @@ func renderHelpFns(b *strings.Builder, fnBase, usage, title string, cmds []model
 		b.WriteString("    echo \"\"\n")
 		fmt.Fprintf(b, "    echo %s\n", shQuote("Команды:"))
 		for _, r := range rows {
-			// Ширина поля имени = целевая колонка минус собственный отступ строки.
-			nameWidth := maxCol - len([]rune(r.indent))
-			format := fmt.Sprintf("%s%%-%ds  %%s\\n", r.indent, nameWidth)
-			line := fmt.Sprintf("    printf %s %s %s\n",
-				shQuote(format), shQuote(r.name), shQuote(r.desc))
+			// Дополняем пробелами здесь, а не через printf %-Ns: оболочки
+			// считают ширину в байтах, и кириллица сбивала бы колонку.
+			pad := maxCol - len([]rune(r.indent)) - len([]rune(r.name))
+			text := r.indent + r.name + strings.Repeat(" ", pad) + "  " + r.desc
+			line := fmt.Sprintf("    printf '%%s\\n' %s\n", shQuote(strings.TrimRight(text, " ")))
 			if r.cond != "" {
 				fmt.Fprintf(b, "    if %s; then\n%s    fi\n", r.cond, line)
 			} else {
@@ -120,7 +120,11 @@ func collectHelpRows(cmds []models.Command, level int, parentCond string) []help
 	childIndent := strings.Repeat(" ", 2+4*(level+1))
 	for _, c := range cmds {
 		cond := combineConditions(parentCond, c.Condition)
-		rows = append(rows, helpRow{indent: indent, name: c.Name, desc: c.Description, cond: cond})
+		name := c.Name
+		if u := strings.TrimSpace(c.Usage); u != "" {
+			name += " " + u
+		}
+		rows = append(rows, helpRow{indent: indent, name: name, desc: c.Description, cond: cond})
 		if c.IsBranch() {
 			rows = append(rows, collectHelpRows(c.Subcommands, level+1, cond)...)
 		} else {
