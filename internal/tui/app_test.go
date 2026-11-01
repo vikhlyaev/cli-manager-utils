@@ -792,3 +792,52 @@ func TestRunTrailingNewlineTrimmed(t *testing.T) {
 		t.Errorf("flag().Run = %q", got)
 	}
 }
+
+// TestDuplicateCommand — `c` вставляет независимую копию после оригинала с
+// уникальным именем; undo убирает копию.
+func TestDuplicateCommand(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	cfg := &models.Config{Variables: map[string]string{}, Prefixes: []models.Prefix{{
+		Name: "av", Commands: []models.Command{
+			{Name: "note", Run: "echo", Flags: []models.Flag{{Name: "--x", Run: "echo x"}},
+				Subcommands: []models.Command{{Name: "sub", Run: "echo s"}}},
+			{Name: "last"},
+		},
+	}}}
+	m := NewModel(cfg)
+	m = feed(m, tea.WindowSizeMsg{Width: 80, Height: 24},
+		tea.KeyMsg{Type: tea.KeyEnter}, tea.KeyMsg{Type: tea.KeyEnter}, // -> команды av
+		runes("c"))
+
+	cmds := m.cfg.Prefixes[0].Commands
+	if len(cmds) != 3 || cmds[1].Name != "note-copy" || cmds[2].Name != "last" {
+		t.Fatalf("ожидалась копия note-copy после note: %+v", cmds)
+	}
+	if m.commandsList.GlobalIndex() != 1 {
+		t.Errorf("выделение должно перейти на копию, index=%d", m.commandsList.GlobalIndex())
+	}
+	cmds[1].Flags[0].Name = "--changed"
+	cmds[1].Subcommands[0].Name = "changed"
+	if cmds[0].Flags[0].Name != "--x" || cmds[0].Subcommands[0].Name != "sub" {
+		t.Fatal("копия должна быть глубокой и не делить срезы с оригиналом")
+	}
+
+	m = feed(m, runes("k"), runes("c")) // ещё раз с оригинала
+	if got := m.cfg.Prefixes[0].Commands[1].Name; got != "note-copy2" {
+		t.Errorf("второе имя копии = %q, ожидалось note-copy2", got)
+	}
+
+	m = feed(m, runes("u"), runes("u"))
+	if n := len(m.cfg.Prefixes[0].Commands); n != 2 {
+		t.Errorf("после двух undo должно остаться 2 команды, получено %d", n)
+	}
+}
+
+func TestDuplicatePrefixUsesUnderscore(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	m := NewModel(&models.Config{Variables: map[string]string{}, Prefixes: []models.Prefix{{Name: "av"}}})
+	m = feed(m, tea.WindowSizeMsg{Width: 80, Height: 24}, tea.KeyMsg{Type: tea.KeyEnter}, runes("c"))
+	if len(m.cfg.Prefixes) != 2 || m.cfg.Prefixes[1].Name != "av_copy" {
+		t.Fatalf("ожидался префикс av_copy: %+v", m.cfg.Prefixes)
+	}
+}

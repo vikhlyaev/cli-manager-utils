@@ -5,6 +5,7 @@ import (
 	"slices"
 
 	"github.com/charmbracelet/bubbles/list"
+	"gopkg.in/yaml.v3"
 
 	"cli-manager/internal/compiler"
 	"cli-manager/internal/importer"
@@ -262,4 +263,86 @@ func (m *model) importAliases() {
 	if !m.statusErr { // не затираем ошибку сохранения
 		m.setStatus(fmt.Sprintf("Импорт: добавлено %d, пропущено %d", len(toAdd), skipped))
 	}
+}
+
+// --- Дублирование ---
+
+// duplicate вставляет сразу после выбранного элемента его глубокую копию с
+// уникальным именем (<имя>-copy, <имя>-copy2, …) и выделяет копию.
+func (m *model) duplicate() {
+	switch m.state {
+	case statePrefixList:
+		ps := m.cfg.Prefixes
+		i := m.prefixesList.GlobalIndex()
+		if !inRange(i, len(ps)) {
+			return
+		}
+		c := deepCopy(ps[i])
+		// Имя префикса — имя функции, дефис недопустим.
+		c.Name = uniqueName(c.Name, "_copy", func(n string) bool {
+			return slices.ContainsFunc(ps, func(p models.Prefix) bool { return p.Name == n })
+		})
+		m.mutate(func() { m.cfg.Prefixes = slices.Insert(m.cfg.Prefixes, i+1, c) })
+		m.afterDuplicate(&m.prefixesList, m.refreshPrefixList, i+1, "префикса", c.Name)
+
+	case stateCommandList:
+		children := m.childrenPtr()
+		i := m.commandsList.GlobalIndex()
+		if !inRange(i, len(*children)) {
+			return
+		}
+		c := deepCopy((*children)[i])
+		c.Name = uniqueName(c.Name, "-copy", func(n string) bool {
+			return slices.ContainsFunc(*children, func(x models.Command) bool { return x.Name == n })
+		})
+		m.mutate(func() { *children = slices.Insert(*children, i+1, c) })
+		m.afterDuplicate(&m.commandsList, m.refreshCommandList, i+1, "команды", c.Name)
+
+	case stateFlagList:
+		cmd := m.commandAt(m.flagCmdPath)
+		if cmd == nil {
+			return
+		}
+		i := m.flagsList.GlobalIndex()
+		if !inRange(i, len(cmd.Flags)) {
+			return
+		}
+		f := cmd.Flags[i]
+		f.Name = uniqueName(f.Name, "-copy", func(n string) bool {
+			return slices.ContainsFunc(cmd.Flags, func(x models.Flag) bool { return x.Name == n })
+		})
+		m.mutate(func() { cmd.Flags = slices.Insert(cmd.Flags, i+1, f) })
+		m.afterDuplicate(&m.flagsList, m.refreshFlagList, i+1, "флага", f.Name)
+	}
+}
+
+func (m *model) afterDuplicate(l *list.Model, refresh func(), idx int, what, name string) {
+	refresh()
+	l.Select(idx)
+	if !m.statusErr {
+		m.setStatus(fmt.Sprintf("Создана копия %s: %s", what, name))
+	}
+}
+
+// uniqueName подбирает свободное имя base+suffix, base+suffix+"2", …
+func uniqueName(base, suffix string, taken func(string) bool) string {
+	name := base + suffix
+	for n := 2; taken(name); n++ {
+		name = fmt.Sprintf("%s%s%d", base, suffix, n)
+	}
+	return name
+}
+
+// deepCopy возвращает независимую копию значения (через YAML round-trip):
+// у копии команды свои срезы флагов и подкоманд.
+func deepCopy[T any](v T) T {
+	var c T
+	data, err := yaml.Marshal(v)
+	if err != nil {
+		return v
+	}
+	if err := yaml.Unmarshal(data, &c); err != nil {
+		return v
+	}
+	return c
 }
