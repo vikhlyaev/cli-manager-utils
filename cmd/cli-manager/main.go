@@ -7,6 +7,7 @@ import (
 	"cli-manager/internal/compiler"
 	"cli-manager/internal/storage"
 	"cli-manager/internal/tui"
+	"cli-manager/internal/validation"
 )
 
 func main() {
@@ -14,6 +15,10 @@ func main() {
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "Ошибка загрузки конфигурации:", err)
 		os.Exit(1)
+	}
+
+	for _, p := range validation.ValidateConfig(cfg) {
+		fmt.Fprintln(os.Stderr, "Предупреждение: конфиг:", p)
 	}
 
 	// Регенерируем скрипт при каждом запуске, чтобы улучшения компилятора

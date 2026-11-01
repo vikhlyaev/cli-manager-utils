@@ -12,6 +12,7 @@ import (
 	"github.com/charmbracelet/huh"
 
 	"cli-manager/internal/models"
+	"cli-manager/internal/validation"
 )
 
 // importedPrefix — имя префикса-контейнера, в который складываются alias,
@@ -174,7 +175,11 @@ func inRange(i, n int) bool { return i >= 0 && i < n }
 
 // Run запускает TUI-приложение.
 func Run(cfg *models.Config) {
-	p := tea.NewProgram(NewModel(cfg), tea.WithAltScreen())
+	m := NewModel(cfg)
+	if ps := validation.ValidateConfig(cfg); len(ps) > 0 {
+		m.setError(fmt.Sprintf("⚠ В конфиге проблем: %d (первая — %s). Подробнее: cli-manager doctor", len(ps), ps[0]))
+	}
+	p := tea.NewProgram(m, tea.WithAltScreen())
 	if _, err := p.Run(); err != nil {
 		fmt.Fprintln(os.Stderr, "Ошибка при запуске TUI:", err)
 		os.Exit(1)
