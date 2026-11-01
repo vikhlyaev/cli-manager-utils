@@ -1,14 +1,27 @@
 # cli-manager — сборка и запуск
 # ─────────────────────────────────────────────
 
-PKG := ./cmd/cli-manager
+PKG     := ./cmd/cli-manager
+BIN     := bin/cli-manager
+VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
+LDFLAGS := -X cli-manager/internal/buildinfo.Version=$(VERSION)
 
 .DEFAULT_GOAL := run
 
-## run: запустить приложение (регенерирует generated.zsh на старте)
+## run: запустить приложение (регенерирует скрипт на старте)
 .PHONY: run
 run:
-	go run $(PKG)
+	go run -ldflags "$(LDFLAGS)" $(PKG)
+
+## build: собрать бинарник в bin/
+.PHONY: build
+build:
+	go build -ldflags "$(LDFLAGS)" -o $(BIN) $(PKG)
+
+## install: установить бинарник в $(go env GOPATH)/bin
+.PHONY: install
+install:
+	go install -ldflags "$(LDFLAGS)" $(PKG)
 
 ## test: прогнать все тесты
 .PHONY: test
@@ -24,6 +37,11 @@ fmt:
 .PHONY: vet
 vet:
 	go vet ./...
+
+## clean: удалить собранные файлы
+.PHONY: clean
+clean:
+	rm -rf bin
 
 ## help: показать список целей
 .PHONY: help
