@@ -46,3 +46,10 @@ func TestParseAliasesEmpty(t *testing.T) {
 		t.Errorf("ожидался пустой результат, получено %+v", got)
 	}
 }
+
+func TestZshrcPathHonorsZDOTDIR(t *testing.T) {
+	t.Setenv("ZDOTDIR", "/tmp/zdot")
+	if got := ZshrcPath(); got != "/tmp/zdot/.zshrc" {
+		t.Errorf("ZshrcPath() = %q", got)
+	}
+}

@@ -3,7 +3,6 @@ package tui
 import (
 	"fmt"
 	"slices"
-	"strings"
 
 	"github.com/charmbracelet/bubbles/list"
 	"gopkg.in/yaml.v3"
@@ -41,6 +40,10 @@ func (m *model) mutateIf(fn func() bool) {
 func (m *model) persist() {
 	if m.saveAndGenerate() {
 		m.setStatus("Сохранено и скомпилировано ✓")
+	}
+	// Предупреждение о проблемах конфига снимаем, как только их исправили.
+	if m.configWarn != "" {
+		m.configWarn = configWarning(m.cfg)
 	}
 }
 
@@ -197,6 +200,11 @@ func (m *model) moveFlag(delta int) {
 
 // moveItem переставляет выбранный в l элемент (из n) на delta позиций.
 func (m *model) moveItem(l *list.Model, n, delta int, swap func(i, j int), refresh func()) {
+	// В отфильтрованном списке сосед по экрану — не сосед в конфиге.
+	if l.IsFiltered() {
+		m.setStatus("Сбросьте поиск (esc), чтобы менять порядок")
+		return
+	}
 	i := l.GlobalIndex()
 	j := i + delta
 	if !inRange(i, n) || !inRange(j, n) {
@@ -219,7 +227,7 @@ func swapper[T any](s []T) func(i, j int) {
 // пропускаются; пустой контейнер не создаётся.
 func (m *model) importAliases() {
 	rcPath := importer.RCPath(m.shellName())
-	rc := strings.Replace(rcPath, homeDir(), "~", 1) // для подписей
+	rc := tildePath(rcPath) // для подписей
 	aliases, err := importer.LoadAliasesFrom(rcPath)
 	if err != nil {
 		m.setError("Импорт: не удалось прочитать " + rc + ": " + err.Error())

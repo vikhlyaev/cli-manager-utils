@@ -118,14 +118,18 @@ func (m *model) prefixCollision(name string) string {
 	}
 	if m.aliases[name] {
 		return fmt.Sprintf("в %s есть alias '%s' — при вызове сработает он, а не префикс",
-			strings.Replace(rc, homeDir(), "~", 1), name)
+			tildePath(rc), name)
 	}
 	return ""
 }
 
-func homeDir() string {
-	h, _ := os.UserHomeDir()
-	return h
+// tildePath сокращает домашний каталог в начале пути до ~ (для подписей).
+func tildePath(p string) string {
+	h, err := os.UserHomeDir()
+	if err != nil || h == "" || !strings.HasPrefix(p, h) {
+		return p
+	}
+	return "~" + p[len(h):]
 }
 
 // runTest выполняет bash-код из поля run (Ctrl+T) и сохраняет вывод для показа.

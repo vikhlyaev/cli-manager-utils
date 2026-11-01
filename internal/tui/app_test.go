@@ -898,3 +898,21 @@ func TestImportAliasesFromBashrc(t *testing.T) {
 		t.Errorf("статус должен называть файл: %q", m.status)
 	}
 }
+
+// TestMoveRefusedWhileFiltered — при поиске соседний на экране элемент не
+// сосед в конфиге, поэтому перестановка запрещена.
+func TestMoveRefusedWhileFiltered(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	m := NewModel(&models.Config{Variables: map[string]string{}, Prefixes: []models.Prefix{
+		{Name: "aa"}, {Name: "bb"}, {Name: "ab"},
+	}})
+	m = feed(m, tea.WindowSizeMsg{Width: 80, Height: 24}, tea.KeyMsg{Type: tea.KeyEnter})
+	m.prefixesList.SetFilterText("ab")
+	m = feed(m, runes("K"))
+	if m.cfg.Prefixes[0].Name != "aa" || m.cfg.Prefixes[1].Name != "bb" || m.cfg.Prefixes[2].Name != "ab" {
+		t.Fatalf("порядок не должен меняться: %+v", m.cfg.Prefixes)
+	}
+	if !strings.Contains(m.status, "Сбросьте поиск") {
+		t.Errorf("status=%q", m.status)
+	}
+}

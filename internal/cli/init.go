@@ -3,6 +3,8 @@ package cli
 import (
 	"bufio"
 	"fmt"
+	"os"
+	"runtime"
 	"strings"
 
 	"cli-manager/internal/compiler"
@@ -62,6 +64,8 @@ func runInit(args []string, s IO) int {
 		}
 	}
 
+	_, statErr := os.Stat(rc)
+	hadRC := statErr == nil
 	if _, err := shellrc.Install(rc, script); err != nil {
 		fmt.Fprintln(s.Err, "Не удалось изменить", rc+":", err)
 		return 1
@@ -70,7 +74,14 @@ func runInit(args []string, s IO) int {
 	if err := c.Generate(cfg); err != nil {
 		fmt.Fprintln(s.Err, "Предупреждение: не удалось сгенерировать скрипт:", err)
 	}
-	fmt.Fprintf(s.Out, "Готово: скрипт подключён в %s (прежняя версия — %s.bak).\n", rc, rc)
+	if hadRC {
+		fmt.Fprintf(s.Out, "Готово: скрипт подключён в %s (прежняя версия — %s.bak).\n", rc, rc)
+	} else {
+		fmt.Fprintf(s.Out, "Готово: создан %s с подключением скрипта.\n", rc)
+	}
+	if shellOf(cfg.Shell) == "bash" && runtime.GOOS == "darwin" {
+		fmt.Fprintf(s.Out, "На macOS терминал читает ~/.bash_profile — убедитесь, что в нём есть: %s\n", bashrcSourceLine)
+	}
 	fmt.Fprintf(s.Out, "Откройте новый терминал или выполните: source %s\n", rc)
 	return 0
 }

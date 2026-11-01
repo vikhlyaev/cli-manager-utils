@@ -5,6 +5,8 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
+	"runtime"
 	"strings"
 
 	"cli-manager/internal/compiler"
@@ -103,12 +105,13 @@ func checkRC(r *report, rc, script, shell string) {
 	r.ok("скрипт подключён в %s", rc)
 
 	if shell != "zsh" {
+		checkBashLogin(r)
 		return
 	}
 	data, _ := os.ReadFile(rc)
-	text := string(data)
-	ci := strings.Index(text, "compinit")
-	si := strings.Index(text, "cli-manager")
+	lines := codeLines(string(data))
+	ci := firstLine(lines, compinitMarkers...)
+	si := firstLine(lines, "cli-manager")
 	switch {
 	case ci < 0:
 		r.warn("в %s нет compinit — автодополнение не заработает (добавьте: autoload -Uz compinit && compinit)", rc)
@@ -118,6 +121,61 @@ func checkRC(r *report, rc, script, shell string) {
 		r.ok("автодополнение: compinit найден")
 	}
 }
+
+// compinitMarkers — признаки инициализации completion в .zshrc: сам compinit
+// или фреймворк, который вызывает его внутри себя.
+var compinitMarkers = []string{
+	"compinit", "oh-my-zsh.sh", "zprezto", "zinit", "zimfw", "antidote", "antigen", "zplug",
+}
+
+// codeLines возвращает строки rc-файла без комментариев.
+func codeLines(text string) []string {
+	var out []string
+	for _, l := range strings.Split(text, "\n") {
+		if t := strings.TrimSpace(l); t != "" && !strings.HasPrefix(t, "#") {
+			out = append(out, t)
+		}
+	}
+	return out
+}
+
+// firstLine — номер первой строки, содержащей любую из подстрок, или -1.
+func firstLine(lines []string, subs ...string) int {
+	for i, l := range lines {
+		for _, s := range subs {
+			if strings.Contains(l, s) {
+				return i
+			}
+		}
+	}
+	return -1
+}
+
+// checkBashLogin: на macOS терминалы запускают login-bash, который читает
+// ~/.bash_profile, а не ~/.bashrc. Если профиль не подключает .bashrc,
+// скрипт не загрузится.
+func checkBashLogin(r *report) {
+	if runtime.GOOS != "darwin" {
+		return
+	}
+	home, _ := os.UserHomeDir()
+	for _, name := range []string{".bash_profile", ".bash_login", ".profile"} {
+		data, err := os.ReadFile(filepath.Join(home, name))
+		if err != nil {
+			continue
+		}
+		// bash читает только первый найденный из этих файлов.
+		if firstLine(codeLines(string(data)), ".bashrc") >= 0 {
+			r.ok("~/%s подключает ~/.bashrc", name)
+		} else {
+			r.warn("~/%s не подключает ~/.bashrc — в терминале macOS скрипт не загрузится; добавьте в него: %s", name, bashrcSourceLine)
+		}
+		return
+	}
+	r.warn("нет ~/.bash_profile — терминал macOS не прочитает ~/.bashrc; создайте его со строкой: %s", bashrcSourceLine)
+}
+
+const bashrcSourceLine = `[ -f ~/.bashrc ] && . ~/.bashrc`
 
 // checkCollisions: имя префикса не перекрывает системную команду или alias.
 func checkCollisions(r *report, prefixes []models.Prefix, rc string) {

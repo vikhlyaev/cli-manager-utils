@@ -16,8 +16,11 @@ type Alias struct {
 	Value string
 }
 
-// ZshrcPath возвращает путь к ~/.zshrc.
+// ZshrcPath возвращает путь к .zshrc: в $ZDOTDIR, если он задан, иначе в ~.
 func ZshrcPath() string {
+	if dir := os.Getenv("ZDOTDIR"); dir != "" {
+		return filepath.Join(dir, ".zshrc")
+	}
 	home, _ := os.UserHomeDir()
 	return filepath.Join(home, ".zshrc")
 }

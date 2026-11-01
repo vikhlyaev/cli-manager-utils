@@ -149,3 +149,28 @@ func TestDoctor(t *testing.T) {
 		t.Errorf("нет проверки compinit:\n%s", out)
 	}
 }
+
+// TestDoctorCompinitDetection — compinit в комментарии не считается, а
+// фреймворк вроде oh-my-zsh — считается.
+func TestDoctorCompinitDetection(t *testing.T) {
+	cases := map[string]string{
+		"# autoload -Uz compinit && compinit\n": "нет compinit",
+		"source $ZSH/oh-my-zsh.sh\n":            "compinit найден",
+		"autoload -Uz compinit && compinit\n":   "compinit найден",
+	}
+	for rcText, want := range cases {
+		home := t.TempDir()
+		t.Setenv("HOME", home)
+		rc := filepath.Join(home, ".zshrc")
+		if err := os.WriteFile(rc, []byte(rcText), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if code, _, errOut := run(t, "init", "--yes"); code != 0 {
+			t.Fatalf("init: %s", errOut)
+		}
+		_, out, _ := run(t, "doctor")
+		if !strings.Contains(out, want) {
+			t.Errorf("rc %q: ожидалось %q в:\n%s", rcText, want, out)
+		}
+	}
+}

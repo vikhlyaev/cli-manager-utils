@@ -188,6 +188,15 @@ func sortedKeys(mp map[string]string) []string {
 	return keys
 }
 
+// configWarning — строка о проблемах конфига для главного меню (пусто, если их нет).
+func configWarning(cfg *models.Config) string {
+	ps := validation.ValidateConfig(cfg)
+	if len(ps) == 0 {
+		return ""
+	}
+	return fmt.Sprintf("⚠ В конфиге проблем: %d (первая — %s). Подробнее: cli-manager doctor", len(ps), ps[0])
+}
+
 // checkSourced проверяет, подключён ли сгенерированный скрипт в rc-файле
 // текущей оболочки. Ошибку чтения не показываем — это лишь подсказка.
 func (m *model) checkSourced() {
@@ -201,9 +210,7 @@ func inRange(i, n int) bool { return i >= 0 && i < n }
 func Run(cfg *models.Config) {
 	m := NewModel(cfg)
 	m.checkSourced()
-	if ps := validation.ValidateConfig(cfg); len(ps) > 0 {
-		m.configWarn = fmt.Sprintf("⚠ В конфиге проблем: %d (первая — %s). Подробнее: cli-manager doctor", len(ps), ps[0])
-	}
+	m.configWarn = configWarning(cfg)
 	p := tea.NewProgram(m, tea.WithAltScreen())
 	if _, err := p.Run(); err != nil {
 		fmt.Fprintln(os.Stderr, "Ошибка при запуске TUI:", err)
