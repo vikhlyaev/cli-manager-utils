@@ -27,6 +27,7 @@ type formBuffers struct {
 	condition   string
 	usage       string
 	acceptsArgs bool
+	afterCmd    bool // флаг: сначала действие команды
 }
 
 func (fb *formBuffers) loadCommand(c models.Command) {
@@ -51,10 +52,11 @@ func trimRun(s string) string { return strings.TrimRight(s, "\n") }
 
 func (fb *formBuffers) loadFlag(f models.Flag) {
 	fb.name, fb.description, fb.run = f.Name, f.Description, f.Run
+	fb.afterCmd = f.AfterCommand
 }
 
 func (fb *formBuffers) flag() models.Flag {
-	return models.Flag{Name: fb.name, Description: fb.description, Run: trimRun(fb.run)}
+	return models.Flag{Name: fb.name, Description: fb.description, Run: trimRun(fb.run), AfterCommand: fb.afterCmd}
 }
 
 // validatePrefixName проверяет формат имени префикса (имя zsh-функции) и его
@@ -221,6 +223,11 @@ func (m *model) initFlagForm() tea.Cmd {
 				Title("Описание").
 				Value(&m.fb.description),
 			runField(&m.fb.run),
+			huh.NewConfirm().
+				Key("after_command").
+				Title("Сначала выполнить действие команды?").
+				Description("Да — напр. команда делает cd, а флаг запускает инструмент в этой папке. Нет — флаг заменяет действие команды").
+				Value(&m.fb.afterCmd),
 		),
 	).WithShowHelp(false)
 	return m.form.Init()

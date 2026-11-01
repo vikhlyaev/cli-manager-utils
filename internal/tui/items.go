@@ -72,10 +72,14 @@ type flagItem struct{ flag models.Flag }
 
 func (i flagItem) Title() string { return mark(i.flag.Disabled, i.flag.Name) }
 func (i flagItem) Description() string {
-	if i.flag.Description != "" {
-		return i.flag.Description
+	d := i.flag.Description
+	if d == "" {
+		d = i.flag.Run
 	}
-	return i.flag.Run
+	if i.flag.AfterCommand {
+		d += " · после действия команды"
+	}
+	return d
 }
 func (i flagItem) FilterValue() string { return i.flag.Name }
 

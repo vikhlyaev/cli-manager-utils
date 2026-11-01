@@ -1,6 +1,7 @@
 package compiler
 
 import (
+	"os"
 	"os/exec"
 	"strings"
 	"testing"
@@ -109,6 +110,55 @@ func TestHelpTextIsLiteral(t *testing.T) {
 				if !strings.Contains(string(out), want) {
 					t.Errorf("нет %q в справке:\n%s", want, out)
 				}
+			}
+		})
+	}
+}
+
+// TestFlagAfterCommand — флаг с after_command сначала выполняет действие
+// команды в текущей оболочке (cd остаётся в силе), а при его ошибке не
+// запускается; обычный флаг по-прежнему заменяет действие команды.
+func TestFlagAfterCommand(t *testing.T) {
+	for _, c := range []Compiler{ZshCompiler{}, BashCompiler{}} {
+		shell := "zsh"
+		if _, ok := c.(BashCompiler); ok {
+			shell = "bash"
+		}
+		t.Run(shell, func(t *testing.T) {
+			if _, err := exec.LookPath(shell); err != nil {
+				t.Skip(shell + " не установлен")
+			}
+			home := t.TempDir()
+			t.Setenv("HOME", home)
+			cfg := &models.Config{Prefixes: []models.Prefix{{Name: "av", Commands: []models.Command{
+				{Name: "vault", Run: "cd " + home + "/vault\necho BASE", Flags: []models.Flag{
+					{Name: "--here", Run: "echo HERE=$PWD", AfterCommand: true},
+					{Name: "--alone", Run: "echo ALONE"},
+				}},
+				{Name: "broken", Run: "cd /nonexistent-dir-xyz", Flags: []models.Flag{
+					{Name: "--tool", Run: "echo TOOL_RAN", AfterCommand: true},
+				}},
+			}}}}
+			if err := os.MkdirAll(home+"/vault", 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := c.Generate(cfg); err != nil {
+				t.Fatal(err)
+			}
+			script := "source " + c.OutputPath() + "\n" +
+				"cd /\nav vault --here; echo PWD_AFTER=$PWD\n" +
+				"cd /\nav vault --alone; echo PWD_ALONE=$PWD\n" +
+				"av broken --tool 2>/dev/null; echo RC=$?\n"
+			out, _ := exec.Command(shell, "-c", script).CombinedOutput()
+			s := string(out)
+			real := home + "/vault"
+			for _, want := range []string{"BASE\nHERE=" + real, "PWD_AFTER=" + real, "ALONE\nPWD_ALONE=/\n", "RC=1"} {
+				if !strings.Contains(s, want) {
+					t.Errorf("нет %q в выводе:\n%s", want, s)
+				}
+			}
+			if strings.Contains(s, "TOOL_RAN") {
+				t.Errorf("при ошибке действия команды флаг не должен запускаться:\n%s", s)
 			}
 		})
 	}

@@ -5,6 +5,10 @@ type Flag struct {
 	Name        string `yaml:"name"`
 	Description string `yaml:"description,omitempty"`
 	Run         string `yaml:"run"`
+	// AfterCommand — перед действием флага выполнить действие самой команды
+	// (напр. команда делает cd, а флаг запускает в этой папке инструмент).
+	// Если действие команды завершилось ошибкой, флаг не выполняется.
+	AfterCommand bool `yaml:"after_command,omitempty"`
 	// Disabled — флаг выключен: остаётся в конфиге, но не попадает в скрипт.
 	Disabled bool `yaml:"disabled,omitempty"`
 }

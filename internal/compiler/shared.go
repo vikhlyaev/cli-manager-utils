@@ -244,6 +244,13 @@ func renderLeafBody(b *strings.Builder, c models.Command, indent string) {
 			if f.Description != "" {
 				fmt.Fprintf(b, "%s        # %s\n", indent, f.Description)
 			}
+			if f.AfterCommand && strings.TrimSpace(c.Run) != "" {
+				// Сначала действие команды (в текущей оболочке, чтобы сработал cd);
+				// при ошибке флаг не запускаем и возвращаем её код.
+				fmt.Fprintf(b, "%s        {\n", indent)
+				writeIndentedBody(b, c.Run, indent+"            ")
+				fmt.Fprintf(b, "%s        } || return $?\n", indent)
+			}
 			writeIndentedBody(b, f.Run, indent+"        ")
 			fmt.Fprintf(b, "%s        ;;\n", indent)
 		}

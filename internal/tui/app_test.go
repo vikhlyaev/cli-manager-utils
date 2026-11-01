@@ -916,3 +916,13 @@ func TestMoveRefusedWhileFiltered(t *testing.T) {
 		t.Errorf("status=%q", m.status)
 	}
 }
+
+// TestFlagFormKeepsAfterCommand — признак after_command переживает правку флага.
+func TestFlagFormKeepsAfterCommand(t *testing.T) {
+	fb := &formBuffers{}
+	fb.loadFlag(models.Flag{Name: "--claude", Run: "claude", AfterCommand: true})
+	fb.description = "новое"
+	if f := fb.flag(); !f.AfterCommand || f.Description != "новое" {
+		t.Fatalf("after_command потерялся: %+v", f)
+	}
+}
