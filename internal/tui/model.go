@@ -19,7 +19,7 @@ import (
 )
 
 // importedPrefix — имя префикса-контейнера, в который складываются alias,
-// импортированные из ~/.zshrc.
+// импортированные из rc-файла оболочки.
 const importedPrefix = "imported"
 
 // undoLimit — максимальная глубина undo-стека.

@@ -176,7 +176,7 @@ func TestToggleShell(t *testing.T) {
 	}
 }
 
-// TestImportAliases — `i` в списке префиксов импортирует alias из ~/.zshrc в
+// TestImportAliases — `i` в списке префиксов импортирует alias из rc-файла в
 // префикс-контейнер «imported», пропуская невалидные имена.
 func TestImportAliases(t *testing.T) {
 	home := t.TempDir()
@@ -875,5 +875,26 @@ func TestToggleDisabled(t *testing.T) {
 	m = feed(m, runes("x"))
 	if m.cfg.Prefixes[0].Commands[0].Disabled {
 		t.Fatal("повторное x должно включить команду")
+	}
+}
+
+// TestImportAliasesFromBashrc — при оболочке bash alias берутся из ~/.bashrc.
+func TestImportAliasesFromBashrc(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	_ = os.WriteFile(filepath.Join(home, ".zshrc"), []byte("alias fromzsh='echo z'\n"), 0o644)
+	_ = os.WriteFile(filepath.Join(home, ".bashrc"), []byte("alias frombash='echo b'\n"), 0o644)
+
+	m := NewModel(&models.Config{Shell: "bash", Variables: map[string]string{}})
+	m = feed(m, tea.WindowSizeMsg{Width: 80, Height: 24}, tea.KeyMsg{Type: tea.KeyEnter}, runes("i"))
+	if len(m.cfg.Prefixes) != 1 || len(m.cfg.Prefixes[0].Commands) != 1 {
+		t.Fatalf("ожидалась одна команда: %+v", m.cfg.Prefixes)
+	}
+	c := m.cfg.Prefixes[0].Commands[0]
+	if c.Name != "frombash" || c.Description != "импорт из ~/.bashrc" {
+		t.Errorf("ожидался alias из ~/.bashrc, получено %+v", c)
+	}
+	if !strings.Contains(m.status, "~/.bashrc") {
+		t.Errorf("статус должен называть файл: %q", m.status)
 	}
 }

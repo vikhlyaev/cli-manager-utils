@@ -3,6 +3,7 @@ package tui
 import (
 	"fmt"
 	"slices"
+	"strings"
 
 	"github.com/charmbracelet/bubbles/list"
 	"gopkg.in/yaml.v3"
@@ -212,13 +213,16 @@ func swapper[T any](s []T) func(i, j int) {
 
 // --- Импорт ---
 
-// importAliases читает alias из ~/.zshrc и добавляет их командами в префикс-
+// importAliases читает alias из rc-файла выбранной оболочки (~/.zshrc или
+// ~/.bashrc) и добавляет их командами в префикс-
 // контейнер importedPrefix. Невалидные имена и уже существующие команды
 // пропускаются; пустой контейнер не создаётся.
 func (m *model) importAliases() {
-	aliases, err := importer.LoadAliases()
+	rcPath := importer.RCPath(m.shellName())
+	rc := strings.Replace(rcPath, homeDir(), "~", 1) // для подписей
+	aliases, err := importer.LoadAliasesFrom(rcPath)
 	if err != nil {
-		m.setError("Импорт: не удалось прочитать ~/.zshrc: " + err.Error())
+		m.setError("Импорт: не удалось прочитать " + rc + ": " + err.Error())
 		return
 	}
 
@@ -241,19 +245,19 @@ func (m *model) importAliases() {
 		}
 		existing[a.Name] = true
 		toAdd = append(toAdd, models.Command{
-			Name: a.Name, Run: a.Value, Description: "импорт из ~/.zshrc",
+			Name: a.Name, Run: a.Value, Description: "импорт из " + rc,
 		})
 	}
 
 	if len(toAdd) == 0 {
-		m.setStatus(fmt.Sprintf("Импорт: нечего добавлять (пропущено %d)", skipped))
+		m.setStatus(fmt.Sprintf("Импорт из %s: нечего добавлять (пропущено %d)", rc, skipped))
 		return
 	}
 
 	m.mutate(func() {
 		if idx < 0 {
 			m.cfg.Prefixes = append(m.cfg.Prefixes, models.Prefix{
-				Name: importedPrefix, Description: "Импортированные алиасы из ~/.zshrc",
+				Name: importedPrefix, Description: "Импортированные алиасы из " + rc,
 			})
 			idx = len(m.cfg.Prefixes) - 1
 		}
@@ -261,7 +265,7 @@ func (m *model) importAliases() {
 	})
 	m.refreshPrefixList()
 	if !m.statusErr { // не затираем ошибку сохранения
-		m.setStatus(fmt.Sprintf("Импорт: добавлено %d, пропущено %d", len(toAdd), skipped))
+		m.setStatus(fmt.Sprintf("Импорт из %s: добавлено %d, пропущено %d", rc, len(toAdd), skipped))
 	}
 }
 
