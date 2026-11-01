@@ -764,3 +764,31 @@ func TestFilteredSelectionUsesRealIndex(t *testing.T) {
 		t.Fatalf("esc должен снять фильтр и остаться в списке: state=%v", mesc.state)
 	}
 }
+
+func TestEditorCommand(t *testing.T) {
+	t.Setenv("VISUAL", "")
+	t.Setenv("EDITOR", "")
+	if got := editorCommand(); len(got) != 1 || got[0] != "nano" {
+		t.Errorf("по умолчанию nano, получено %v", got)
+	}
+	t.Setenv("EDITOR", "code -w")
+	if got := editorCommand(); len(got) != 2 || got[0] != "code" || got[1] != "-w" {
+		t.Errorf("EDITOR с аргументами: %v", got)
+	}
+	t.Setenv("VISUAL", "nvim")
+	if got := editorCommand(); got[0] != "nvim" {
+		t.Errorf("VISUAL важнее EDITOR: %v", got)
+	}
+}
+
+// TestRunTrailingNewlineTrimmed — хвостовой перевод строки от редактора не
+// попадает в конфиг.
+func TestRunTrailingNewlineTrimmed(t *testing.T) {
+	fb := &formBuffers{name: "x", run: "echo hi\n\n"}
+	if got := fb.command().Run; got != "echo hi" {
+		t.Errorf("command().Run = %q", got)
+	}
+	if got := fb.flag().Run; got != "echo hi" {
+		t.Errorf("flag().Run = %q", got)
+	}
+}

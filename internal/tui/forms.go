@@ -2,6 +2,8 @@ package tui
 
 import (
 	"fmt"
+	"os"
+	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/huh"
@@ -36,18 +38,21 @@ func (fb *formBuffers) command() models.Command {
 	return models.Command{
 		Name:        fb.name,
 		Description: fb.description,
-		Run:         fb.run,
+		Run:         trimRun(fb.run),
 		AcceptsArgs: fb.acceptsArgs,
 		Condition:   fb.condition,
 	}
 }
+
+// trimRun убирает хвостовые переводы строки (их дописывают внешние редакторы).
+func trimRun(s string) string { return strings.TrimRight(s, "\n") }
 
 func (fb *formBuffers) loadFlag(f models.Flag) {
 	fb.name, fb.description, fb.run = f.Name, f.Description, f.Run
 }
 
 func (fb *formBuffers) flag() models.Flag {
-	return models.Flag{Name: fb.name, Description: fb.description, Run: fb.run}
+	return models.Flag{Name: fb.name, Description: fb.description, Run: trimRun(fb.run)}
 }
 
 // validatePrefixName проверяет формат имени префикса (имя zsh-функции) и его
@@ -122,6 +127,29 @@ func validateCondition(s string) error {
 	return validation.CheckCondition(s)
 }
 
+// runField — многострочное поле bash-кода. Ctrl+E (когда поле в фокусе)
+// открывает код во внешнем редакторе — это умеет сам huh; задаём только
+// редактор и расширение .sh для подсветки синтаксиса.
+func runField(v *string) *huh.Text {
+	return huh.NewText().
+		Key("run").
+		Title("Действие (bash) · Ctrl+T — тест · Ctrl+E — редактор").
+		Value(v).
+		Lines(3).
+		Editor(editorCommand()...).
+		EditorExtension("sh")
+}
+
+// editorCommand возвращает внешний редактор: $VISUAL, затем $EDITOR, иначе nano.
+func editorCommand() []string {
+	for _, env := range []string{"VISUAL", "EDITOR"} {
+		if f := strings.Fields(os.Getenv(env)); len(f) > 0 {
+			return f
+		}
+	}
+	return []string{"nano"}
+}
+
 // initPrefixForm — форма создания/редактирования префикса.
 // Буфер m.fb должен быть подготовлен (и при редактировании заполнен) заранее.
 func (m *model) initPrefixForm() tea.Cmd {
@@ -155,11 +183,7 @@ func (m *model) initCommandForm() tea.Cmd {
 				Key("description").
 				Title("Описание").
 				Value(&m.fb.description),
-			huh.NewText().
-				Key("run").
-				Title("Действие (bash) · Ctrl+T — тест").
-				Value(&m.fb.run).
-				Lines(3),
+			runField(&m.fb.run),
 			huh.NewConfirm().
 				Key("accepts_args").
 				Title("Принимает аргументы ($@)?").
@@ -189,11 +213,7 @@ func (m *model) initFlagForm() tea.Cmd {
 				Key("description").
 				Title("Описание").
 				Value(&m.fb.description),
-			huh.NewText().
-				Key("run").
-				Title("Действие (bash) · Ctrl+T — тест").
-				Value(&m.fb.run).
-				Lines(3),
+			runField(&m.fb.run),
 		),
 	).WithShowHelp(false)
 	return m.form.Init()

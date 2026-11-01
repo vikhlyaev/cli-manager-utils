@@ -171,7 +171,11 @@ func (m model) viewForm() string {
 		b.WriteString("\n" + boxStyle.Render(title+"\n"+m.testOutput))
 	}
 
-	b.WriteString("\n\n" + hintStyle.Render("[enter] далее/сохранить  [esc] отмена  [ctrl+t] тест"))
+	hints := "[enter] далее/сохранить  [esc] отмена"
+	if m.state.hasRunField() {
+		hints += "  [ctrl+t] тест  [ctrl+e] редактор (в поле действия)"
+	}
+	b.WriteString("\n\n" + hintStyle.Render(hints))
 	return docStyle.Render(b.String())
 }
 
