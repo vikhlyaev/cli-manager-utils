@@ -13,7 +13,12 @@ LDFLAGS := -X cli-manager/internal/buildinfo.Version=$(VERSION)
 run:
 	go run -ldflags "$(LDFLAGS)" $(PKG)
 
-## build: собрать бинарник в bin/
+## ui: запустить веб-интерфейс (аргументы — через UI_ARGS, напр. UI_ARGS="--port 8080 --no-open")
+.PHONY: ui
+ui:
+	go run -ldflags "$(LDFLAGS)" $(PKG) ui $(UI_ARGS)
+
+## build: собрать бинарник в bin/ (веб-интерфейс встроен через go:embed)
 .PHONY: build
 build:
 	go build -ldflags "$(LDFLAGS)" -o $(BIN) $(PKG)

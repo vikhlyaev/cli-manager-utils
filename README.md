@@ -164,7 +164,8 @@ cli-manager init
 
 ```bash
 make run     # запустить TUI (по умолчанию)
-make build   # собрать bin/cli-manager
+make ui      # запустить веб-интерфейс (UI_ARGS="--port 8080 --no-open")
+make build   # собрать bin/cli-manager (веб-интерфейс встроен в бинарник)
 make test    # прогнать тесты
 make fmt     # отформатировать код
 make vet     # статический анализ
