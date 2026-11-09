@@ -67,3 +67,15 @@ func TestValidateConfigProblems(t *testing.T) {
 		t.Errorf("ожидалось %d проблем, получено %d:\n%s", len(wants), len(ps), all)
 	}
 }
+
+func TestValidateFlagClashesWithSubcommand(t *testing.T) {
+	cfg := &models.Config{Prefixes: []models.Prefix{{Name: "av", Commands: []models.Command{
+		{Name: "mb", Run: "cd x",
+			Flags:       []models.Flag{{Name: "--profile", Run: "a"}, {Name: "loc", Run: "b"}},
+			Subcommands: []models.Command{{Name: "loc", Run: "c"}}},
+	}}}}
+	ps := ValidateConfig(cfg)
+	if len(ps) != 1 || !strings.Contains(ps[0].String(), "совпадает с подкомандой") {
+		t.Fatalf("ожидалась одна проблема о совпадении имён, получено: %v", ps)
+	}
+}

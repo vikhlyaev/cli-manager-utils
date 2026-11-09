@@ -81,7 +81,7 @@ func (bc BashCompiler) renderPrefix(b *strings.Builder, p models.Prefix) {
 	if p.Description != "" {
 		title = p.Name + " — " + p.Description
 	}
-	renderHelpFns(b, "__"+p.Name, p.Name, title, p.Commands)
+	renderHelpFns(b, "__"+p.Name, p.Name, title, p.Commands, nil)
 	renderDispatcher(b, p)
 	bc.renderCompletion(b, p)
 }
@@ -94,7 +94,7 @@ func (BashCompiler) renderCompletion(b *strings.Builder, p models.Prefix) {
 	b.WriteString("    local cur=\"${COMP_WORDS[COMP_CWORD]}\"\n")
 	b.WriteString("    local __path=\"${COMP_WORDS[*]:1:COMP_CWORD-1}\"\n")
 	b.WriteString("    case \"$__path\" in\n")
-	renderCompletionTree(b, p.Commands, "", bashEmitter{})
+	renderCompletionTree(b, p.Commands, nil, "", bashEmitter{})
 	b.WriteString("    esac\n")
 	b.WriteString("}\n")
 
@@ -106,7 +106,7 @@ func (BashCompiler) renderCompletion(b *strings.Builder, p models.Prefix) {
 // bashEmitter выводит кандидатов автодополнения средствами bash (compgen).
 type bashEmitter struct{}
 
-func (bashEmitter) emitCommands(b *strings.Builder, path string, cmds []models.Command) {
+func (bashEmitter) emitCommands(b *strings.Builder, path string, cmds []models.Command, flags []models.Flag) {
 	fmt.Fprintf(b, "        %s)\n", shCasePattern(path))
 	b.WriteString("            local __c=\"\"\n")
 	for _, c := range cmds {
@@ -115,6 +115,9 @@ func (bashEmitter) emitCommands(b *strings.Builder, path string, cmds []models.C
 		} else {
 			fmt.Fprintf(b, "            __c+=%s\n", shQuote(c.Name+" "))
 		}
+	}
+	for _, f := range flags {
+		fmt.Fprintf(b, "            __c+=%s\n", shQuote(f.Name+" "))
 	}
 	b.WriteString("            COMPREPLY=( $(compgen -W \"$__c\" -- \"$cur\") )\n")
 	b.WriteString("            ;;\n")

@@ -54,7 +54,7 @@ func renderPrefixHeader(b *strings.Builder, p models.Prefix) {
 // аналогичные функции для всех его ветвей. fnBase — основа имени функции
 // (напр. "__av" или "__av_db"); usage — человекочитаемый путь ("av" / "av db");
 // title — заголовок (только для корня), для вложенных уровней пустой.
-func renderHelpFns(b *strings.Builder, fnBase, usage, title string, cmds []models.Command) {
+func renderHelpFns(b *strings.Builder, fnBase, usage, title string, cmds []models.Command, flags []models.Flag) {
 	fmt.Fprintf(b, "%s_help() {\n", fnBase)
 	if title != "" {
 		fmt.Fprintf(b, "    echo %s\n", shLiteral(title))
@@ -64,8 +64,12 @@ func renderHelpFns(b *strings.Builder, fnBase, usage, title string, cmds []model
 
 	if len(cmds) > 0 {
 		// Полностью разворачиваем дерево: показываем все подкоманды и флаги на
-		// любой глубине, ничего не пряча.
+		// любой глубине, ничего не пряча. Флаги самой ветви — в конце, с тем
+		// же отступом, что и её подкоманды.
 		rows := collectHelpRows(cmds, 0, "")
+		for _, f := range flags {
+			rows = append(rows, helpRow{indent: "  ", name: f.Name, desc: f.Description})
+		}
 
 		// Колонку описаний выравниваем по самому длинному «отступ + имя» среди
 		// всех строк, чтобы описания на любой глубине стояли единым столбцом.
@@ -97,7 +101,7 @@ func renderHelpFns(b *strings.Builder, fnBase, usage, title string, cmds []model
 	// Рекурсивно генерируем help-функции вложенных ветвей.
 	for _, c := range cmds {
 		if c.IsBranch() {
-			renderHelpFns(b, fnBase+"_"+sanitizeIdent(c.Name), usage+" "+c.Name, "", c.Subcommands)
+			renderHelpFns(b, fnBase+"_"+sanitizeIdent(c.Name), usage+" "+c.Name, "", c.Subcommands, c.Flags)
 		}
 	}
 }
@@ -114,7 +118,7 @@ type helpRow struct {
 // collectHelpRows рекурсивно разворачивает дерево команд в плоский список строк
 // справки. level — глубина (0 для команд верхнего уровня), parentCond —
 // накопленное условие показа родителя. Для ветвей вглубь идут подкоманды, для
-// листьев — их флаги.
+// любых узлов — их флаги (у ветви — после подкоманд).
 func collectHelpRows(cmds []models.Command, level int, parentCond string) []helpRow {
 	var rows []helpRow
 	indent := strings.Repeat(" ", 2+4*level)
@@ -128,10 +132,9 @@ func collectHelpRows(cmds []models.Command, level int, parentCond string) []help
 		rows = append(rows, helpRow{indent: indent, name: name, desc: c.Description, cond: cond})
 		if c.IsBranch() {
 			rows = append(rows, collectHelpRows(c.Subcommands, level+1, cond)...)
-		} else {
-			for _, f := range c.Flags {
-				rows = append(rows, helpRow{indent: childIndent, name: f.Name, desc: f.Description, cond: cond})
-			}
+		}
+		for _, f := range c.Flags {
+			rows = append(rows, helpRow{indent: childIndent, name: f.Name, desc: f.Description, cond: cond})
 		}
 	}
 	return rows
@@ -159,7 +162,7 @@ func renderDispatcher(b *strings.Builder, p models.Prefix) {
 	// Форма `function name {`, а не `name() {`: если у пользователя есть alias с
 	// тем же именем, `name() {` раскрывается как alias и ломает весь скрипт.
 	fmt.Fprintf(b, "function %s {\n", p.Name)
-	renderDispatchLevel(b, p.Commands, 1, "__"+p.Name, p.Name, "", "    ")
+	renderDispatchLevel(b, p.Commands, nil, 1, "__"+p.Name, p.Name, "", "    ")
 	b.WriteString("}\n\n")
 }
 
@@ -167,12 +170,13 @@ func renderDispatcher(b *strings.Builder, p models.Prefix) {
 // case по командам этого уровня со справкой и веткой по умолчанию.
 //
 //	cmds     — команды этого уровня
+//	flags    — флаги узла-родителя (у ветви могут быть и подкоманды, и флаги)
 //	depth    — глубина (для уникального имени переменной __arg<depth>)
 //	fnBase   — основа имени help-функции уровня
 //	usage    — человекочитаемый путь до уровня
 //	fallback — действие узла-родителя при нераспознанной подкоманде (может быть "")
 //	indent   — отступ операторов внутри функции
-func renderDispatchLevel(b *strings.Builder, cmds []models.Command, depth int, fnBase, usage, fallback, indent string) {
+func renderDispatchLevel(b *strings.Builder, cmds []models.Command, flags []models.Flag, depth int, fnBase, usage, fallback, indent string) {
 	argVar := fmt.Sprintf("__arg%d", depth)
 	fmt.Fprintf(b, "%slocal %s=\"$1\"\n", indent, argVar)
 	fmt.Fprintf(b, "%sshift 2>/dev/null\n\n", indent)
@@ -207,6 +211,18 @@ func renderDispatchLevel(b *strings.Builder, cmds []models.Command, depth int, f
 
 	for _, c := range cmds {
 		renderArm(b, c, depth, fnBase, usage, fallback, indent+"    ")
+	}
+	// Флаги ветви: токен уже снят shift-ом, поэтому $1 — первый аргумент флага.
+	for _, f := range flags {
+		fmt.Fprintf(b, "%s    %s)\n", indent, shCasePattern(f.Name))
+		if f.Description != "" {
+			fmt.Fprintf(b, "%s        # %s\n", indent, f.Description)
+		}
+		if f.AfterCommand {
+			writeRunFirst(b, fallback, indent+"        ")
+		}
+		writeIndentedBody(b, f.Run, indent+"        ")
+		fmt.Fprintf(b, "%s        ;;\n", indent)
 	}
 
 	// Ветка по умолчанию: действие родителя (если задано) либо ошибка + справка.
@@ -244,7 +260,7 @@ func renderArm(b *strings.Builder, c models.Command, depth int, parentFnBase, us
 
 	if c.IsBranch() {
 		fnBase := parentFnBase + "_" + sanitizeIdent(c.Name)
-		renderDispatchLevel(b, c.Subcommands, depth+1, fnBase, usage+" "+c.Name, c.Run, indent+"    ")
+		renderDispatchLevel(b, c.Subcommands, c.Flags, depth+1, fnBase, usage+" "+c.Name, c.Run, indent+"    ")
 	} else {
 		renderLeafBody(b, c, usage+" "+c.Name, indent+"    ")
 	}
@@ -325,8 +341,8 @@ func renderLeafBody(b *strings.Builder, c models.Command, path string, indent st
 // completionEmitter абстрагирует вывод кандидатов для конкретной оболочки.
 type completionEmitter interface {
 	// emitCommands печатает ветку case по пути path, предлагающую дочерние
-	// команды cmds (с учётом контекстных условий).
-	emitCommands(b *strings.Builder, path string, cmds []models.Command)
+	// команды cmds (с учётом контекстных условий) и флаги ветви flags.
+	emitCommands(b *strings.Builder, path string, cmds []models.Command, flags []models.Flag)
 	// emitLeaf печатает ветку case по пути path для листовой команды c
 	// (флаги и/или файлы).
 	emitLeaf(b *strings.Builder, path string, c models.Command)
@@ -335,15 +351,15 @@ type completionEmitter interface {
 // renderCompletionTree обходит дерево команд и для каждого узла-ветви печатает
 // ветку с дочерними командами, а для каждого листа с флагами/аргументами — ветку
 // с его дополнениями. Путь узла (через пробел) служит ключом ветки case.
-func renderCompletionTree(b *strings.Builder, cmds []models.Command, path string, e completionEmitter) {
-	e.emitCommands(b, path, cmds)
+func renderCompletionTree(b *strings.Builder, cmds []models.Command, flags []models.Flag, path string, e completionEmitter) {
+	e.emitCommands(b, path, cmds, flags)
 	for _, c := range cmds {
 		childPath := c.Name
 		if path != "" {
 			childPath = path + " " + c.Name
 		}
 		if c.IsBranch() {
-			renderCompletionTree(b, c.Subcommands, childPath, e)
+			renderCompletionTree(b, c.Subcommands, c.Flags, childPath, e)
 		} else if len(c.Flags) > 0 || c.AcceptsArgs {
 			e.emitLeaf(b, childPath, c)
 		}

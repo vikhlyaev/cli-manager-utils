@@ -49,6 +49,9 @@ func (i commandItem) Description() string {
 	var meta string
 	if i.cmd.IsBranch() {
 		meta = fmt.Sprintf("подкоманд: %d", len(i.cmd.Subcommands))
+		if n := len(i.cmd.Flags); n > 0 {
+			meta += fmt.Sprintf(" · флагов: %d", n)
+		}
 	} else {
 		meta = fmt.Sprintf("флагов: %d", len(i.cmd.Flags))
 	}

@@ -103,3 +103,59 @@ func TestRequiredArgs(t *testing.T) {
 		}
 	}
 }
+
+// Конфиг со скриншота: у группы mb есть и флаг --profile, и подкоманда loc.
+// Раньше флаги ветви отбрасывались, и `av mb --profile` делал только cd.
+func TestBranchFlagsWithSubcommands(t *testing.T) {
+	for _, c := range []Compiler{ZshCompiler{}, BashCompiler{}} {
+		shell := "zsh"
+		if _, ok := c.(BashCompiler); ok {
+			shell = "bash"
+		}
+		t.Run(shell, func(t *testing.T) {
+			if _, err := exec.LookPath(shell); err != nil {
+				t.Skip(shell + " не установлен")
+			}
+			home := t.TempDir()
+			t.Setenv("HOME", home)
+			if err := os.MkdirAll(home+"/mb", 0o755); err != nil {
+				t.Fatal(err)
+			}
+			cfg := &models.Config{Prefixes: []models.Prefix{{Name: "av", Commands: []models.Command{
+				{Name: "mb", Run: "cd " + home + "/mb",
+					Flags: []models.Flag{
+						{Name: "--profile", Description: "Сборка для Profile", AfterCommand: true, Run: `echo "GEN IN=$PWD ARGS=$#"`},
+						{Name: "--alone", Run: `echo "ALONE IN=$PWD"`},
+					},
+					Subcommands: []models.Command{
+						{Name: "loc", AcceptsArgs: true, AfterCommand: true, Run: `echo "LOC file=$1 IN=$PWD"`},
+					}},
+			}}}}
+			if err := c.Generate(cfg); err != nil {
+				t.Fatal(err)
+			}
+			run := func(cmd string) string {
+				o, _ := exec.Command(shell, "-c", "source "+c.OutputPath()+"\ncd /\n"+cmd+"; echo RC=$?").CombinedOutput()
+				return string(o)
+			}
+			dir := home + "/mb"
+			for cmd, want := range map[string]string{
+				"av mb --profile":          "GEN IN=" + dir + " ARGS=0\nRC=0",
+				"av mb --profile x":        "GEN IN=" + dir + " ARGS=1\nRC=0",
+				"av mb --alone":            "ALONE IN=/\nRC=0",
+				"av mb loc profile":        "LOC file=profile IN=" + dir + "\nRC=0",
+				"av mb; echo PWD=$PWD":     "PWD=" + dir,
+				"av mb --help":             "--profile",
+				"av --help | grep profile": "--profile",
+			} {
+				if got := run(cmd); !strings.Contains(got, want) {
+					t.Errorf("%s: нет %q в выводе:\n%s", cmd, want, got)
+				}
+			}
+			if out := c.Render(cfg); !strings.Contains(out, "--profile") ||
+				!strings.Contains(out[strings.Index(out, "_av_completions()"):], "--profile") {
+				t.Errorf("флаг ветви должен быть в автодополнении:\n%s", out)
+			}
+		})
+	}
+}

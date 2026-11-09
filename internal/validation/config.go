@@ -64,6 +64,10 @@ func validateCommands(path string, cmds []models.Command) []Problem {
 			ps = append(ps, Problem{cp, "ошибка в условии: " + err.Error()})
 		}
 
+		subs := map[string]bool{}
+		for _, sc := range c.Subcommands {
+			subs[sc.Name] = true
+		}
 		flags := map[string]bool{}
 		for _, f := range c.Flags {
 			fp := cp + " " + f.Name
@@ -72,6 +76,9 @@ func validateCommands(path string, cmds []models.Command) []Problem {
 			}
 			if flags[f.Name] {
 				ps = append(ps, Problem{fp, "флаг с таким именем уже есть"})
+			}
+			if subs[f.Name] {
+				ps = append(ps, Problem{fp, "имя флага совпадает с подкомандой — сработает подкоманда"})
 			}
 			flags[f.Name] = true
 		}

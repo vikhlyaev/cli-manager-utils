@@ -553,9 +553,6 @@ function renderDetail() {
   }
   form.append(checkbox("f-disabled", node, "disabled", "Выключено", "Остаётся в конфиге, но не попадает в скрипт"));
 
-  if (kind === "command" && node.subcommands?.length && node.flags?.length) {
-    form.append(el("div", { class: "note warn", text: "У команды есть подкоманды — при генерации флаги игнорируются." }));
-  }
 
   pane.replaceChildren(head, form);
   renderDetailProblemsOnly();

@@ -82,7 +82,7 @@ func (z ZshCompiler) renderPrefix(b *strings.Builder, p models.Prefix) {
 	if p.Description != "" {
 		title = p.Name + " — " + p.Description
 	}
-	renderHelpFns(b, "__"+p.Name, p.Name, title, p.Commands)
+	renderHelpFns(b, "__"+p.Name, p.Name, title, p.Commands, nil)
 	renderDispatcher(b, p)
 	z.renderCompletion(b, p)
 }
@@ -95,7 +95,7 @@ func (ZshCompiler) renderCompletion(b *strings.Builder, p models.Prefix) {
 	fmt.Fprintf(b, "_%s_completions() {\n", p.Name)
 	b.WriteString("    local __path=\"${(j: :)words[2,CURRENT-1]}\"\n")
 	b.WriteString("    case \"$__path\" in\n")
-	renderCompletionTree(b, p.Commands, "", zshEmitter{})
+	renderCompletionTree(b, p.Commands, nil, "", zshEmitter{})
 	b.WriteString("    esac\n")
 	b.WriteString("}\n")
 
@@ -108,7 +108,7 @@ func (ZshCompiler) renderCompletion(b *strings.Builder, p models.Prefix) {
 // zshEmitter выводит кандидатов автодополнения средствами zsh (_describe/_files).
 type zshEmitter struct{}
 
-func (zshEmitter) emitCommands(b *strings.Builder, path string, cmds []models.Command) {
+func (zshEmitter) emitCommands(b *strings.Builder, path string, cmds []models.Command, flags []models.Flag) {
 	fmt.Fprintf(b, "        %s)\n", shCasePattern(path))
 	b.WriteString("            local -a __c\n")
 	for _, c := range cmds {
@@ -120,6 +120,13 @@ func (zshEmitter) emitCommands(b *strings.Builder, path string, cmds []models.Co
 		}
 	}
 	b.WriteString("            _describe -t commands 'команда' __c\n")
+	if len(flags) > 0 {
+		b.WriteString("            local -a __f\n")
+		for _, f := range flags {
+			fmt.Fprintf(b, "            __f+=(%s)\n", shLiteral(f.Name+":"+f.Description))
+		}
+		b.WriteString("            _describe -t flags 'флаг' __f\n")
+	}
 	b.WriteString("            ;;\n")
 }
 
