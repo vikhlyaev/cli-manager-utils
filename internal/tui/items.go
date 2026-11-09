@@ -60,6 +60,9 @@ func (i commandItem) Description() string {
 	if i.cmd.Condition != "" {
 		meta += " · условие"
 	}
+	if i.cmd.AfterCommand {
+		meta += " · после действия родителя"
+	}
 	if desc != "" {
 		return fmt.Sprintf("%s · %s", desc, meta)
 	}

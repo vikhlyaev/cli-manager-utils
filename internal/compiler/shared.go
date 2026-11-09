@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"regexp"
 	"sort"
 	"strings"
 
@@ -186,9 +187,18 @@ func renderDispatchLevel(b *strings.Builder, cmds []models.Command, depth int, f
 			break
 		}
 	}
-	helpPattern := `""|-h|--help`
+	helpPattern := `-h|--help`
 	if !hasHelpCmd {
-		helpPattern = `""|-h|--help|help`
+		helpPattern = `-h|--help|help`
+	}
+	if strings.TrimSpace(fallback) != "" {
+		// У группы есть своё действие: без подкоманды выполняем его
+		// (`av mb` делает cd), а справка — только по -h/--help.
+		fmt.Fprintf(b, "%s    \"\")\n", indent)
+		writeIndentedBody(b, fallback, indent+"        ")
+		fmt.Fprintf(b, "%s        ;;\n", indent)
+	} else {
+		helpPattern = `""|` + helpPattern
 	}
 	fmt.Fprintf(b, "%s    %s)\n", indent, helpPattern)
 	fmt.Fprintf(b, "%s        %s_help\n", indent, fnBase)
@@ -196,7 +206,7 @@ func renderDispatchLevel(b *strings.Builder, cmds []models.Command, depth int, f
 	fmt.Fprintf(b, "%s        ;;\n", indent)
 
 	for _, c := range cmds {
-		renderArm(b, c, depth, fnBase, usage, indent+"    ")
+		renderArm(b, c, depth, fnBase, usage, fallback, indent+"    ")
 	}
 
 	// Ветка по умолчанию: действие родителя (если задано) либо ошибка + справка.
@@ -215,26 +225,75 @@ func renderDispatchLevel(b *strings.Builder, cmds []models.Command, depth int, f
 }
 
 // renderArm генерирует одну ветку case для команды: ветвь рекурсивно разбирает
-// подкоманды, лист исполняет тело (с флагами или без).
-func renderArm(b *strings.Builder, c models.Command, depth int, parentFnBase, usage, indent string) {
+// подкоманды, лист исполняет тело (с флагами или без). parentRun — действие
+// родительской команды (для after_command), может быть "".
+func renderArm(b *strings.Builder, c models.Command, depth int, parentFnBase, usage, parentRun, indent string) {
 	fmt.Fprintf(b, "%s%s)\n", indent, shCasePattern(c.Name))
 	if c.Description != "" {
 		fmt.Fprintf(b, "%s    # %s\n", indent, c.Description)
+	}
+	// Без флагов аргументы проверяем до действия родителя: при ошибке ввода
+	// не должно быть побочных эффектов вроде cd.
+	simpleLeaf := !c.IsBranch() && len(c.Flags) == 0
+	if simpleLeaf {
+		writeArgsCheck(b, c, usage+" "+c.Name, indent+"    ")
+	}
+	if c.AfterCommand {
+		writeRunFirst(b, parentRun, indent+"    ")
 	}
 
 	if c.IsBranch() {
 		fnBase := parentFnBase + "_" + sanitizeIdent(c.Name)
 		renderDispatchLevel(b, c.Subcommands, depth+1, fnBase, usage+" "+c.Name, c.Run, indent+"    ")
 	} else {
-		renderLeafBody(b, c, indent+"    ")
+		renderLeafBody(b, c, usage+" "+c.Name, indent+"    ")
 	}
 
 	fmt.Fprintf(b, "%s    ;;\n", indent)
 }
 
+// writeRunFirst печатает действие, которое нужно выполнить перед основным
+// (after_command): в текущей оболочке, чтобы сработал cd; при ошибке
+// основное действие не запускается и возвращается её код.
+func writeRunFirst(b *strings.Builder, run, indent string) {
+	if strings.TrimSpace(run) == "" {
+		return
+	}
+	fmt.Fprintf(b, "%s{\n", indent)
+	writeIndentedBody(b, run, indent+"    ")
+	fmt.Fprintf(b, "%s} || return $?\n", indent)
+}
+
+// writeArgsCheck печатает проверку обязательных аргументов из usage: если их
+// меньше, чем <…> в описании, печатает подсказку и возвращает 2.
+func writeArgsCheck(b *strings.Builder, c models.Command, path, indent string) {
+	n := requiredArgs(c.Usage)
+	if n == 0 {
+		return
+	}
+	msg := path + ": не хватает аргументов. Использование: " + path + " " + strings.TrimSpace(c.Usage)
+	fmt.Fprintf(b, "%sif (( $# < %d )); then\n", indent, n)
+	fmt.Fprintf(b, "%s    echo %s >&2\n", indent, shLiteral(msg))
+	fmt.Fprintf(b, "%s    return 2\n", indent)
+	fmt.Fprintf(b, "%sfi\n", indent)
+}
+
+// requiredArgs считает обязательные аргументы в usage — токены вида <имя>
+// вне квадратных скобок ([…] — необязательные, напр. [<строки>]).
+func requiredArgs(usage string) int {
+	usage = optionalArgRe.ReplaceAllString(usage, "")
+	return len(requiredArgRe.FindAllString(usage, -1))
+}
+
+var (
+	requiredArgRe = regexp.MustCompile(`<[^<>]+>`)
+	optionalArgRe = regexp.MustCompile(`\[[^\]]*\]`)
+)
+
 // renderLeafBody генерирует тело листовой команды: подменю флагов (первый
-// аргумент трактуется как флаг) либо просто действие.
-func renderLeafBody(b *strings.Builder, c models.Command, indent string) {
+// аргумент трактуется как флаг) либо просто действие. path — полный путь
+// команды для сообщений ("av mb loc").
+func renderLeafBody(b *strings.Builder, c models.Command, path string, indent string) {
 	if len(c.Flags) > 0 {
 		fmt.Fprintf(b, "%slocal __flag=\"$1\"\n", indent)
 		fmt.Fprintf(b, "%scase \"$__flag\" in\n", indent)
@@ -244,21 +303,19 @@ func renderLeafBody(b *strings.Builder, c models.Command, indent string) {
 			if f.Description != "" {
 				fmt.Fprintf(b, "%s        # %s\n", indent, f.Description)
 			}
-			if f.AfterCommand && strings.TrimSpace(c.Run) != "" {
-				// Сначала действие команды (в текущей оболочке, чтобы сработал cd);
-				// при ошибке флаг не запускаем и возвращаем её код.
-				fmt.Fprintf(b, "%s        {\n", indent)
-				writeIndentedBody(b, c.Run, indent+"            ")
-				fmt.Fprintf(b, "%s        } || return $?\n", indent)
+			if f.AfterCommand {
+				writeRunFirst(b, c.Run, indent+"        ")
 			}
 			writeIndentedBody(b, f.Run, indent+"        ")
 			fmt.Fprintf(b, "%s        ;;\n", indent)
 		}
 		fmt.Fprintf(b, "%s    *)\n", indent)
+		writeArgsCheck(b, c, path, indent+"        ")
 		writeIndentedBody(b, commandBody(c), indent+"        ")
 		fmt.Fprintf(b, "%s        ;;\n", indent)
 		fmt.Fprintf(b, "%s    esac\n", indent)
 	} else {
+		// Проверка аргументов уже напечатана в renderArm.
 		writeIndentedBody(b, commandBody(c), indent)
 	}
 }
@@ -301,14 +358,20 @@ func sanitizeIdent(s string) string {
 }
 
 // commandBody возвращает тело команды, при необходимости дополняя его пробросом
-// позиционных аргументов "$@".
+// позиционных аргументов "$@". Если run сам обращается к аргументам ($1, ${2},
+// $@, $*, $#), ничего не дописываем — аргументы уже подставлены, где нужно.
 func commandBody(c models.Command) string {
 	body := c.Run
-	if c.AcceptsArgs && !strings.Contains(body, "$@") && !strings.Contains(body, "$*") {
+	if c.AcceptsArgs && !usesArgs(body) {
 		body = strings.TrimRight(body, "\n") + " \"$@\""
 	}
 	return body
 }
+
+// usesArgs сообщает, обращается ли код к позиционным аргументам.
+func usesArgs(body string) bool { return positionalRe.MatchString(body) }
+
+var positionalRe = regexp.MustCompile(`\$(\{#?)?[1-9@*#]`)
 
 // writeIndentedBody печатает многострочный bash-код с заданным отступом.
 func writeIndentedBody(b *strings.Builder, body, indent string) {

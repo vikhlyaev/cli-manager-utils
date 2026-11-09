@@ -29,6 +29,10 @@ type Command struct {
 	Condition   string    `yaml:"condition,omitempty" json:"condition,omitempty"`
 	Flags       []Flag    `yaml:"flags,omitempty" json:"flags,omitempty"`
 	Subcommands []Command `yaml:"subcommands,omitempty" json:"subcommands,omitempty"`
+	// AfterCommand — перед действием подкоманды выполнить действие
+	// родительской команды (напр. родитель делает cd, а подкоманда запускает
+	// в этой папке инструмент). Для команд верхнего уровня не действует.
+	AfterCommand bool `yaml:"after_command,omitempty" json:"after_command,omitempty"`
 	// Disabled — команда (со всеми вложенными) выключена и не генерируется.
 	Disabled bool `yaml:"disabled,omitempty" json:"disabled,omitempty"`
 }

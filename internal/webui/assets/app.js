@@ -539,8 +539,13 @@ function renderDetail() {
           },
         }), { id: "f-cond", hint: "Команда видна в автодополнении, только если условие истинно" }),
       ),
-      checkbox("f-args", node, "accepts_args", "Принимает аргументы", "Аргументы пробрасываются в run как $@"),
+      checkbox("f-args", node, "accepts_args", "Принимает аргументы",
+        "Без $1/$@ в run аргументы дописываются в конец; можно подставить по номеру: rake loc=\"$1\""),
     );
+    if (s.c.length > 1) {
+      form.append(checkbox("f-after-cmd", node, "after_command", "Сначала выполнить действие родительской команды",
+        "Например, родитель делает cd, а подкоманда запускает в этой папке rake"));
+    }
   }
   if (kind === "flag") {
     form.append(checkbox("f-after", node, "after_command", "Сначала выполнить действие команды",

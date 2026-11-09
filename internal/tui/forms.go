@@ -27,23 +27,25 @@ type formBuffers struct {
 	condition   string
 	usage       string
 	acceptsArgs bool
-	afterCmd    bool // флаг: сначала действие команды
+	afterCmd    bool // флаг/подкоманда: сначала действие команды-родителя
 }
 
 func (fb *formBuffers) loadCommand(c models.Command) {
 	fb.name, fb.description, fb.run = c.Name, c.Description, c.Run
 	fb.acceptsArgs, fb.condition, fb.usage = c.AcceptsArgs, c.Condition, c.Usage
+	fb.afterCmd = c.AfterCommand
 }
 
 // command собирает команду из буфера (без флагов и подкоманд).
 func (fb *formBuffers) command() models.Command {
 	return models.Command{
-		Name:        fb.name,
-		Description: fb.description,
-		Run:         trimRun(fb.run),
-		AcceptsArgs: fb.acceptsArgs,
-		Condition:   fb.condition,
-		Usage:       strings.TrimSpace(fb.usage),
+		Name:         fb.name,
+		Description:  fb.description,
+		Run:          trimRun(fb.run),
+		AcceptsArgs:  fb.acceptsArgs,
+		Condition:    fb.condition,
+		Usage:        strings.TrimSpace(fb.usage),
+		AfterCommand: fb.afterCmd,
 	}
 }
 
@@ -191,12 +193,18 @@ func (m *model) initCommandForm() tea.Cmd {
 			huh.NewConfirm().
 				Key("accepts_args").
 				Title("Принимает аргументы ($@)?").
+				Description("В run можно обращаться к ним по номеру: rake loc=\"$1\"").
 				Value(&m.fb.acceptsArgs),
 			huh.NewInput().
 				Key("usage").
 				Title("Аргументы для справки (необязательно)").
-				Description("Напр.: <файл> [строки] — показывается в av --help").
+				Description("Напр.: <файл> [строки] — показывается в av --help; <…> обязательны").
 				Value(&m.fb.usage),
+			huh.NewConfirm().
+				Key("after_command").
+				Title("Сначала выполнить действие родительской команды?").
+				Description("Для подкоманды: напр. родитель делает cd, а подкоманда запускает в этой папке rake").
+				Value(&m.fb.afterCmd),
 			huh.NewInput().
 				Key("condition").
 				Title("Условие автодополнения (необязательно)").
